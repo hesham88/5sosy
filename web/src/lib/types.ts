@@ -39,6 +39,43 @@ export type ActivityItem = {
   status?: 'ok' | 'warn' | 'info';
 };
 
+export type Book = {
+  id: string;
+  subject: SubjectId;
+  arT: string; enT: string;
+  arSub: string; enSub: string;
+  publisher: string;
+  year: number;
+  chapters: number;
+  pages: number;
+  status: 'indexed' | 'processing' | 'queued';
+  mastery: number;
+  lastAccessedAr?: string;
+  lastAccessedEn?: string;
+  cover: string;
+};
+
+export type SubjectProgress = {
+  subject: SubjectId;
+  mastery: number;
+  chaptersDone: number;
+  chaptersTotal: number;
+  books: number;
+  weakTopics: number;
+  minutesThisWeek: number;
+  lastTopicAr: string;
+  lastTopicEn: string;
+};
+
+export type WeekPlanDay = {
+  dayKey: 'sat' | 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri';
+  arLabel: string;
+  enLabel: string;
+  date: number;
+  isToday?: boolean;
+  blocks: PlanBlock[];
+};
+
 export type UserDoc = {
   uid: string;
   displayName: string;

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { useApp } from './Providers';
 import { Logo } from './atoms';
 import { useAuth } from '@/lib/firebase/auth-context';
@@ -9,6 +10,7 @@ import { useAuth } from '@/lib/firebase/auth-context';
 const NAV_ITEMS = [
   { id: 'home',     icon: '🏠' },
   { id: 'subjects', icon: '📚' },
+  { id: 'books',    icon: '📖' },
   { id: 'plan',     icon: '🗓️' },
   { id: 'practice', icon: '🧠' },
   { id: 'oral',     icon: '🎤' },
@@ -17,20 +19,76 @@ const NAV_ITEMS = [
 ] as const;
 
 const NAV_TO_PATH: Record<string, string> = {
-  home: 'home', subjects: 'home', plan: 'home',
+  home: 'home', subjects: 'subjects', books: 'books', plan: 'plan',
   practice: 'quiz', oral: 'oral', progress: 'progress', settings: 'settings'
 };
 
+function activeKeyFor(pathname: string): string {
+  const seg = pathname.split('/').slice(2)[0] ?? 'home';
+  if (seg === 'session') return 'plan';
+  if (seg === 'quiz') return 'practice';
+  return seg;
+}
+
+function NavList({ activeKey, onPick }: { activeKey: string; onPick?: () => void }) {
+  const { locale, t } = useApp();
+  return (
+    <nav className="px-3 py-2 flex-1">
+      {NAV_ITEMS.map((item) => {
+        const active = activeKey === item.id;
+        const href = `/${locale}/${NAV_TO_PATH[item.id] ?? item.id}`;
+        return (
+          <Link
+            key={item.id}
+            href={href}
+            onClick={onPick}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 my-0.5 rounded-lg text-[14px] font-medium transition
+              ${active
+                ? 'bg-sky-50 text-sky-700 shadow-sm'
+                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}
+          >
+            <span className="text-[17px] leading-none">{item.icon}</span>
+            <span>{t.nav[item.id as keyof typeof t.nav]}</span>
+            {active && <span className="ms-auto w-1.5 h-1.5 rounded-full bg-sky-500" />}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
+function UserFooter({ onPick }: { onPick?: () => void }) {
+  const { locale, t, isAR } = useApp();
+  const { user, signOut } = useAuth();
+  return (
+    <div className="border-t border-slate-200 px-4 py-3 flex items-center gap-3">
+      <Link
+        href={user ? `/${locale}/u/${(user.displayName ?? 'me').toLowerCase().replace(/\s+/g,'-')}` : `/${locale}/sign-in`}
+        onClick={onPick}
+        className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-300 to-amber-500 grid place-items-center text-white font-bold text-sm"
+        title={t.nav.profile}
+      >
+        {(user?.displayName ?? (isAR ? 'ي' : 'Y')).slice(0, 1)}
+      </Link>
+      <div className="min-w-0 flex-1">
+        <div className="text-[13px] font-semibold text-slate-900 truncate">
+          {user?.displayName ?? (isAR ? 'يوسف الشريف' : 'Youssef Sherif')}
+        </div>
+        <div className="text-[11px] text-slate-500 truncate">{isAR ? '٣ث علمي علوم' : 'G12 Science'}</div>
+      </div>
+      {user && (
+        <button onClick={() => { signOut(); onPick?.(); }} className="text-[11px] text-slate-400 hover:text-rose-600" title={t.nav.signOut}>
+          ⎋
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function Sidebar() {
   const pathname = usePathname();
-  const { locale, t, isAR, setLocale } = useApp();
-  const { user, signOut } = useAuth();
-
-  const seg = pathname.split('/').slice(2)[0] ?? 'home';
-  const activeKey =
-    seg === 'session' ? 'plan' :
-    seg === 'quiz' ? 'practice' :
-    seg;
+  const { t, isAR, setLocale } = useApp();
+  const activeKey = activeKeyFor(pathname);
 
   return (
     <aside className="hidden lg:flex flex-col w-[232px] shrink-0 bg-white border-e border-slate-200 h-screen sticky top-0">
@@ -42,26 +100,7 @@ export function Sidebar() {
         </div>
       </div>
 
-      <nav className="px-3 py-2 flex-1">
-        {NAV_ITEMS.map((item) => {
-          const active = activeKey === item.id;
-          const href = `/${locale}/${NAV_TO_PATH[item.id] ?? item.id}`;
-          return (
-            <Link
-              key={item.id}
-              href={href}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 my-0.5 rounded-lg text-[14px] font-medium transition
-                ${active
-                  ? 'bg-sky-50 text-sky-700 shadow-sm'
-                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'}`}
-            >
-              <span className="text-[17px] leading-none">{item.icon}</span>
-              <span>{t.nav[item.id as keyof typeof t.nav]}</span>
-              {active && <span className="ms-auto w-1.5 h-1.5 rounded-full bg-sky-500" />}
-            </Link>
-          );
-        })}
-      </nav>
+      <NavList activeKey={activeKey} />
 
       <div className="px-3 pb-3">
         <button
@@ -73,43 +112,69 @@ export function Sidebar() {
         </button>
       </div>
 
-      <div className="border-t border-slate-200 px-4 py-3 flex items-center gap-3">
-        <Link
-          href={user ? `/${locale}/u/${(user.displayName ?? 'me').toLowerCase().replace(/\s+/g,'-')}` : `/${locale}/sign-in`}
-          className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-300 to-amber-500 grid place-items-center text-white font-bold text-sm"
-          title={t.nav.profile}
-        >
-          {(user?.displayName ?? (isAR ? 'ي' : 'Y')).slice(0, 1)}
-        </Link>
-        <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-semibold text-slate-900 truncate">
-            {user?.displayName ?? (isAR ? 'يوسف الشريف' : 'Youssef Sherif')}
-          </div>
-          <div className="text-[11px] text-slate-500 truncate">{isAR ? '٣ث علمي علوم' : 'G12 Science'}</div>
-        </div>
-        {user && (
-          <button onClick={() => signOut()} className="text-[11px] text-slate-400 hover:text-rose-600" title={t.nav.signOut}>
-            ⎋
-          </button>
-        )}
-      </div>
+      <UserFooter />
     </aside>
   );
 }
 
 export function MobileBar() {
+  const pathname = usePathname();
   const { t, isAR, setLocale } = useApp();
+  const [open, setOpen] = useState(false);
+  const activeKey = activeKeyFor(pathname);
+
+  useEffect(() => { setOpen(false); }, [pathname]);
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.body.style.overflow = open ? 'hidden' : '';
+    return () => { document.body.style.overflow = ''; };
+  }, [open]);
+
   return (
-    <div className="lg:hidden sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-200 px-4 py-3 flex items-center gap-3">
-      <Logo size={32} />
-      <div className="font-extrabold text-slate-900">{t.appName}</div>
-      <div className="ms-auto flex items-center gap-2">
-        <button onClick={() => setLocale(isAR ? 'en' : 'ar')}
-          className="text-[12px] font-semibold text-slate-600 bg-slate-100 rounded-lg px-2.5 py-1.5">
-          {isAR ? 'EN' : 'ع'}
+    <>
+      <div className="lg:hidden sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-slate-200 px-4 py-3 flex items-center gap-3">
+        <button
+          onClick={() => setOpen((v) => !v)}
+          aria-label={open ? t.nav.close : t.nav.menu}
+          aria-expanded={open}
+          className="w-10 h-10 -ms-2 grid place-items-center rounded-lg hover:bg-slate-100 active:bg-slate-200 transition"
+        >
+          <div className="relative w-5 h-5 flex flex-col justify-center gap-[5px]">
+            <span className={`block h-0.5 w-5 bg-slate-700 rounded transition-transform origin-center ${open ? 'translate-y-[7px] rotate-45' : ''}`} />
+            <span className={`block h-0.5 w-5 bg-slate-700 rounded transition-opacity ${open ? 'opacity-0' : ''}`} />
+            <span className={`block h-0.5 w-5 bg-slate-700 rounded transition-transform origin-center ${open ? '-translate-y-[7px] -rotate-45' : ''}`} />
+          </div>
         </button>
+        <Logo size={32} />
+        <div className="font-extrabold text-slate-900">{t.appName}</div>
+        <div className="ms-auto flex items-center gap-2">
+          <button onClick={() => setLocale(isAR ? 'en' : 'ar')}
+            className="text-[12px] font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg px-2.5 py-1.5 transition">
+            {isAR ? 'EN' : 'ع'}
+          </button>
+        </div>
       </div>
-    </div>
+
+      {/* Backdrop */}
+      <div
+        onClick={() => setOpen(false)}
+        className={`lg:hidden fixed inset-0 z-20 bg-slate-900/40 transition-opacity ${open ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+        aria-hidden="true"
+      />
+
+      {/* Slide-down drawer */}
+      <div
+        className={`lg:hidden fixed inset-x-0 top-[60px] z-30 bg-white border-b border-slate-200 shadow-lg overflow-hidden transition-[max-height] duration-300 ease-out
+          ${open ? 'max-h-[80vh]' : 'max-h-0'}`}
+        role="dialog"
+        aria-label={t.nav.menu}
+      >
+        <div className="flex flex-col max-h-[80vh] overflow-y-auto">
+          <NavList activeKey={activeKey} onPick={() => setOpen(false)} />
+          <UserFooter onPick={() => setOpen(false)} />
+        </div>
+      </div>
+    </>
   );
 }
 

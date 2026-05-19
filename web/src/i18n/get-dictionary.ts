@@ -9,5 +9,5 @@ const loaders = {
 export type Dictionary = Awaited<ReturnType<typeof loaders.ar>>;
 
 export async function getDictionary(locale: Locale): Promise<Dictionary> {
-  return loaders[locale]();
+  return loaders[locale]() as Promise<Dictionary>;
 }
