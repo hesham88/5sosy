@@ -1,0 +1,53 @@
+# Node / Next
+node_modules/
+.next/
+out/
+
+# Env files
+.env
+.env.local
+.env*.local
+
+# Python / venv
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+storage-debug.log
+ui-debug.log
+.firebaserc.local
+serviceAccountKey.json
+
+# Build / cache
+dist/
+build/
+.turbo/
+.vercel
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Local Claude Code session config
+.claude/
+
+# Embedded prototype with its own git history
+static_prototype/
+
+# Project artifacts kept locally (large)
+5sosy_model/
+*.mp4
+*.zip
+Meshy_AI_extract_*

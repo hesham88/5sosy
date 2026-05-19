@@ -1,0 +1,35 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(uid) { return isSignedIn() && request.auth.uid == uid; }
+
+    // Curriculum / catalogue / content — public read, no writes from client
+    match /subjects/{subjectId}        { allow read: if true; allow write: if false; }
+    match /textbooks/{textbookId}      { allow read: if true; allow write: if false; }
+    match /chapters/{chapterId}        { allow read: if true; allow write: if false; }
+    match /concepts/{conceptId}        { allow read: if true; allow write: if false; }
+    match /quizQuestions/{qid}         { allow read: if true; allow write: if false; }
+
+    // User profile docs
+    match /users/{uid} {
+      allow read: if isSignedIn();             // any signed-in user can read profile cards
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid);
+      allow delete: if false;
+
+      // Subcollections fully owner-scoped
+      match /studyPlans/{planId}   { allow read, write: if isOwner(uid); }
+      match /sessions/{sessionId}  { allow read, write: if isOwner(uid); }
+      match /quizAttempts/{aid}    { allow read, write: if isOwner(uid); }
+      match /mastery/{conceptId}   { allow read, write: if isOwner(uid); }
+      match /activity/{eventId}    { allow read, write: if isOwner(uid); }
+    }
+
+    // Catch-all deny
+    match /{document=**} { allow read, write: if false; }
+  }
+}

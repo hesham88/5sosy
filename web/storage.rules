@@ -1,0 +1,23 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Public read for shared curriculum / generated audio summaries
+    match /curriculum/{allPaths=**}    { allow read: if true;  allow write: if false; }
+    match /audio-summaries/{allPaths=**} { allow read: if true; allow write: if false; }
+
+    // Per-user textbook uploads (PDFs etc) — owner only
+    match /users/{uid}/uploads/{allPaths=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid
+                         && request.resource.size < 50 * 1024 * 1024;
+    }
+
+    // Per-user generated artifacts (reports, oral exam recordings)
+    match /users/{uid}/artifacts/{allPaths=**} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false; // server-side only
+    }
+
+    match /{allPaths=**} { allow read, write: if false; }
+  }
+}

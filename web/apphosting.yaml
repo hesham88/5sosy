@@ -1,0 +1,42 @@
+# Firebase App Hosting config — runs Next.js 15 with default Cloud Run backend.
+# Connect this directory to GitHub via Firebase Console → App Hosting → Add backend.
+runConfig:
+  cpu: 1
+  memoryMiB: 1024
+  maxInstances: 5
+  minInstances: 0
+  concurrency: 80
+
+env:
+  - variable: NEXT_PUBLIC_FIREBASE_API_KEY
+    value: AIzaSyCJwgfsH3jmuy3IMHPkzbUXyhNTVIj28kQ
+    availability: [BUILD, RUNTIME]
+  - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    value: khsosy.firebaseapp.com
+    availability: [BUILD, RUNTIME]
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    value: khsosy
+    availability: [BUILD, RUNTIME]
+  - variable: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+    value: khsosy.firebasestorage.app
+    availability: [BUILD, RUNTIME]
+  - variable: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+    value: "119799379679"
+    availability: [BUILD, RUNTIME]
+  - variable: NEXT_PUBLIC_FIREBASE_APP_ID
+    value: "1:119799379679:web:35685ad446e38af3025b6a"
+    availability: [BUILD, RUNTIME]
+  - variable: NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
+    value: G-LDTVR4FPHV
+    availability: [BUILD, RUNTIME]
+
+  # Set to the Cloud Run URL once the ADK service is deployed.
+  - variable: NEXT_PUBLIC_AGENTS_BASE_URL
+    value: ""
+    availability: [BUILD, RUNTIME]
+
+  # Server-only — use Firebase secret rather than committing.
+  # Create with:   firebase apphosting:secrets:set AGENTS_SERVICE_TOKEN
+  - variable: AGENTS_SERVICE_TOKEN
+    secret: AGENTS_SERVICE_TOKEN
+    availability: [RUNTIME]

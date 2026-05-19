@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>5sosy - The Nile Scholar Blueprint</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chosen Palette: Warm Neutrals (Slate 50/100) with Sky Blue (600/700) primary and Amber (500) accents. -->
+    <!-- Application Structure Plan: The SPA is structured as an interactive executive briefing designed for Hackathon judges and stakeholders. It flows chronologically from the Socio-Economic Problem (market size charts) to the multi-agent Solution (interactive agent explorer), and finally to the Technical Stack (compliance matrix). This non-linear dashboard layout allows users to quickly digest high-level impact before drilling down into the specific Google ADK/Gemini implementations. -->
+    <!-- Visualization & Content Choices: 
+         1. Problem Space -> Goal: Highlight market scale -> Viz: Chart.js Bar Chart (Market Growth) -> Justification: Clearly shows the $0.78B to $1.75B jump. Canvas used.
+         2. Tutoring Reliance -> Goal: Show systemic issue -> Viz: CSS Data Cards -> Justification: Quick, impactful stats (81% secondary reliance). 
+         3. Agent Architecture -> Goal: Explain multi-agent flow -> Viz: Interactive HTML/CSS Grid with state update -> Justification: Avoids complex diagrams while allowing deep-dive into each agent's role. No SVG/Mermaid used.
+         4. Tech Stack -> Goal: Justify model choices -> Viz: Comparative text blocks -> Justification: Emphasizes the Gemini 2.5 Pro vs 3.0 decision securely. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            background-color: #f8fafc;
+            color: #0f172a;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            overflow-x: hidden;
+        }
+        
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 350px;
+            max-height: 400px;
+        }
+
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 400px;
+            }
+        }
+
+        .agent-card {
+            transition: all 0.2s ease-in-out;
+            cursor: pointer;
+        }
+        
+        .agent-card:hover, .agent-card.active {
+            border-color: #0284c7;
+            background-color: #f0f9ff;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        .nav-link {
+            transition: color 0.2s;
+        }
+        .nav-link:hover, .nav-link.active {
+            color: #0284c7;
+            border-bottom: 2px solid #0284c7;
+        }
+
+        .terminal-bg {
+            background-color: #1e293b;
+            color: #38bdf8;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body class="antialiased selection:bg-sky-200 selection:text-sky-900">
+
+    <nav class="sticky top-0 z-50 bg-white/90 backdrop-blur-md border-b border-slate-200 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <span class="text-2xl mr-2">&#128300;</span>
+                    <span class="font-bold text-xl tracking-tight text-slate-800">5sosy <span class="text-sky-600 font-normal">Blueprint</span></span>
+                </div>
+                <div class="hidden md:flex items-center space-x-8">
+                    <a href="#problem" class="nav-link px-1 py-2 text-sm font-medium text-slate-600 active">The Crisis</a>
+                    <a href="#solution" class="nav-link px-1 py-2 text-sm font-medium text-slate-600">Agent Architecture</a>
+                    <a href="#stack" class="nav-link px-1 py-2 text-sm font-medium text-slate-600">Tech Stack & Strategy</a>
+                </div>
+                <div class="flex items-center">
+                    <div class="bg-amber-100 text-amber-800 px-3 py-1 rounded-full text-xs font-bold border border-amber-200 shadow-sm">
+                        &#9203; Track 1 Deadline: <span id="countdown" class="font-mono ml-1">Loading...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <header class="bg-gradient-to-b from-slate-50 to-slate-100 pt-20 pb-16 border-b border-slate-200">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <div class="inline-block mb-4 px-4 py-1 rounded-full bg-sky-100 text-sky-800 text-sm font-semibold tracking-wide uppercase border border-sky-200">
+                Google for Startups AI Agents Challenge 2026
+            </div>
+            <h1 class="text-4xl md:text-5xl lg:text-6xl font-extrabold text-slate-900 tracking-tight mb-6">
+                Autonomous Study Assistant <br class="hidden md:block">
+                <span class="text-transparent bg-clip-text bg-gradient-to-r from-sky-600 to-blue-800">Tailored for Egypt</span>
+            </h1>
+            <p class="mt-4 max-w-2xl mx-auto text-xl text-slate-600 leading-relaxed">
+                A multimodal, declarative-intent educational ecosystem. 5sosy ingests national curricula to democratize elite tutoring, transforming static PDFs into an interactive cognitive mentor.
+            </p>
+            <div class="mt-8 flex justify-center space-x-4">
+                <a href="#solution" class="px-6 py-3 border border-transparent text-base font-medium rounded-lg text-white bg-sky-600 hover:bg-sky-700 transition shadow-md">
+                    Explore Architecture
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <section id="problem" class="py-16 bg-white">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="mb-12 text-center md:text-left">
+                    <h2 class="text-3xl font-bold text-slate-900 mb-4">1. The Socio-Economic Catalyst</h2>
+                    <p class="text-lg text-slate-600 max-w-3xl">
+                        This section outlines the critical friction points in the Egyptian educational ecosystem (Thanaweya Amma). By exploring the financial burden of private tutoring (Deroos Khoseya) and systemic classroom issues, we establish the massive TAM and urgent need for an automated, scalable solution.
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+                    <div>
+                        <div class="bg-slate-50 rounded-xl p-6 border border-slate-200 mb-6">
+                            <h3 class="text-xl font-bold text-slate-800 mb-3">&#128200; The Shadow Education Economy</h3>
+                            <p class="text-slate-600 mb-4">
+                                Decades of structural inefficiencies and disproportionately high student-to-teacher ratios have forced reliance on private tutoring. The market is exploding, placing immense financial strain on families.
+                            </p>
+                            <div class="grid grid-cols-2 gap-4 mt-6">
+                                <div class="bg-white p-4 rounded-lg border border-slate-100 shadow-sm text-center">
+                                    <div class="text-3xl font-black text-sky-600 mb-1">81%</div>
+                                    <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Secondary Students<br>using private tutors</div>
+                                </div>
+                                <div class="bg-white p-4 rounded-lg border border-slate-100 shadow-sm text-center">
+                                    <div class="text-2xl font-black text-amber-600 mb-1">7,010 <span class="text-sm">EGP</span></div>
+                                    <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Avg. Teacher Salary<br>(Monthly, 2024)</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
+                        <h3 class="text-lg font-bold text-slate-800 mb-4 text-center">Private Tutoring Market Growth (Egypt)</h3>
+                        <div class="chart-container">
+                            <canvas id="marketChart"></canvas>
+                        </div>
+                        <p class="text-center text-xs text-slate-500 mt-4">CAGR: 9.26% | Source: 2024 Estimates to 2033 Projections</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <div class="w-full h-px bg-slate-200"></div>
+
+        <section id="solution" class="py-16 bg-slate-50">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="mb-12 text-center">
+                    <h2 class="text-3xl font-bold text-slate-900 mb-4">2. Multi-Agent Orchestration (ADK Framework)</h2>
+                    <p class="text-lg text-slate-600 max-w-4xl mx-auto">
+                        Here we detail the core architecture solving the Track 1 requirements. Click on the specialized agents below to see how the orchestration framework routes declarative intents to transform static PDFs into a dynamic learning experience.
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                    
+                    <div class="lg:col-span-5 space-y-3" id="agent-list">
+                    </div>
+
+                    <div class="lg:col-span-7">
+                        <div class="bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden h-full flex flex-col">
+                            <div class="bg-slate-100 border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+                                <h3 id="active-agent-title" class="font-bold text-lg text-slate-800 flex items-center">
+                                    <span class="mr-2 text-2xl">&#9881;</span> Select an Agent
+                                </h3>
+                                <span class="bg-sky-100 text-sky-800 text-xs px-2 py-1 rounded font-mono border border-sky-200">adk.dev/agent</span>
+                            </div>
+                            <div class="p-6 flex-grow flex flex-col">
+                                <p id="active-agent-desc" class="text-slate-600 mb-6 text-lg">
+                                    Interact with the architecture overview on the left to inspect individual agent graphs, states, and execution vectors.
+                                </p>
+                                
+                                <div class="mt-auto">
+                                    <div class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Simulated Execution Telemetry</div>
+                                    <div class="terminal-bg rounded-lg p-4 h-48 overflow-y-auto text-sm shadow-inner">
+                                        <div id="active-agent-log">
+                                            <span class="text-slate-400">Waiting for orchestrator input...</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="stack" class="py-16 bg-white border-t border-slate-200">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="mb-12 text-center">
+                    <h2 class="text-3xl font-bold text-slate-900 mb-4">3. Tech Stack & Competition Strategy</h2>
+                    <p class="text-lg text-slate-600 max-w-3xl mx-auto">
+                        Technical rationales directly aligning with Google for Startups constraints. This section validates architectural decisions ensuring production-grade reliability and strict adherence to Google Cloud native toolchains.
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+                    <div class="bg-slate-50 p-6 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
+                        <div class="absolute top-0 right-0 bg-sky-500 text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg">CORE</div>
+                        <h4 class="text-lg font-bold text-slate-800 mb-2">&#129488; LLM Routing Strategy</h4>
+                        <ul class="text-sm text-slate-600 space-y-2">
+                            <li class="flex items-start"><span class="text-sky-500 mr-2">&#10003;</span> <strong>Gemini 2.5 Pro:</strong> Default heavyweight for reasoning. Chosen over 3.0 Pro Preview for GA stability.</li>
+                            <li class="flex items-start"><span class="text-sky-500 mr-2">&#10003;</span> <strong>Gemini 2.5 Flash:</strong> Rapid routing and classification.</li>
+                            <li class="flex items-start"><span class="text-sky-500 mr-2">&#10003;</span> <strong>Gemini Flash Lite:</strong> Low-latency guardrails.</li>
+                            <li class="flex items-start text-amber-700 bg-amber-50 p-2 rounded mt-2"><span class="mr-2">&#9888;</span> Multi-LLM (Claude/GPT) excluded to align perfectly with Google judging rubric.</li>
+                        </ul>
+                    </div>
+
+                    <div class="bg-slate-50 p-6 rounded-xl border border-slate-200 shadow-sm">
+                        <h4 class="text-lg font-bold text-slate-800 mb-2">&#128296; Google ADK & MCP</h4>
+                        <p class="text-sm text-slate-600 mb-3">
+                            Migrating from static scripts to declarative graphs.
+                        </p>
+                        <div class="space-y-2">
+                            <div class="bg-white border border-slate-200 p-2 rounded text-xs font-mono text-slate-700">
+                                Framework: ADK Python v1.0
+                            </div>
+                            <div class="bg-white border border-slate-200 p-2 rounded text-xs font-mono text-slate-700">
+                                Protocol: Model Context Protocol (MCP)
+                            </div>
+                            <div class="bg-white border border-slate-200 p-2 rounded text-xs font-mono text-slate-700">
+                                Retrieval: Vertex AI Vector Search
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-50 p-6 rounded-xl border border-slate-200 shadow-sm">
+                        <h4 class="text-lg font-bold text-slate-800 mb-2">&#127911; Multimodal Media Pipelines</h4>
+                        <p class="text-sm text-slate-600 mb-3">
+                            Essential for bypassing text-heavy friction.
+                        </p>
+                        <ul class="text-sm text-slate-600 space-y-2">
+                            <li class="flex items-start"><span class="text-slate-400 mr-2">&#9656;</span> <strong>Ingestion:</strong> Gemini 1.5 Pro Multimodal API for complex PDF charts/tables.</li>
+                            <li class="flex items-start"><span class="text-slate-400 mr-2">&#9656;</span> <strong>Voice:</strong> Assessing ElevenLabs Arabic capabilities vs native Google Cloud TTS for localized Egyptian nuances.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="bg-sky-50 border-l-4 border-sky-600 p-6 rounded-r-xl">
+                    <h4 class="text-lg font-bold text-sky-900 mb-2">Track 1 Compliance Checklist</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                        <div class="flex items-center text-sm text-sky-800">
+                            <span class="text-xl mr-3">&#9745;</span> Blank Canvas / Net-New Architecture
+                        </div>
+                        <div class="flex items-center text-sm text-sky-800">
+                            <span class="text-xl mr-3">&#9745;</span> Static Code -> Declarative Intent
+                        </div>
+                        <div class="flex items-center text-sm text-sky-800">
+                            <span class="text-xl mr-3">&#9745;</span> MCP & External Tool Execution
+                        </div>
+                        <div class="flex items-center text-sm text-sky-800">
+                            <span class="text-xl mr-3">&#9745;</span> Agent Development Kit (ADK) Utilization
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="bg-slate-900 text-slate-400 py-8 border-t border-slate-800">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row justify-between items-center">
+            <div class="mb-4 md:mb-0 text-center md:text-left">
+                <span class="font-bold text-white text-lg tracking-tight">&#128300; 5sosy</span>
+                <p class="text-sm mt-1">Autonomous Educational Orchestration</p>
+            </div>
+            <div class="text-sm text-center md:text-right">
+                <p>Hackathon Submission Blueprint</p>
+                <p class="mt-1">Generated for Google for Startups AI Agents Challenge 2026</p>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+
+            const navLinks = document.querySelectorAll('.nav-link');
+            navLinks.forEach(link => {
+                link.addEventListener('click', function(e) {
+                    navLinks.forEach(l => l.classList.remove('active'));
+                    this.classList.add('active');
+                });
+            });
+
+            const targetDate = new Date('2026-06-06T00:00:00Z').getTime(); // June 5, 5 PM PT is June 6, 00:00 UTC
+            
+            const updateCountdown = () => {
+                const now = new Date().getTime();
+                const distance = targetDate - now;
+
+                if (distance < 0) {
+                    document.getElementById('countdown').innerText = "DEADLINE REACHED";
+                    return;
+                }
+
+                const days = Math.floor(distance / (1000 * 60 * 60 * 24));
+                const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+                
+                document.getElementById('countdown').innerText = `${days}d ${hours}h ${minutes}m`;
+            };
+            
+            setInterval(updateCountdown, 60000);
+            updateCountdown();
+
+            const ctx = document.getElementById('marketChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['2024 (Current)', '2033 (Projected)'],
+                    datasets: [{
+                        label: 'Market Size (Billion USD)',
+                        data: [0.78, 1.75],
+                        backgroundColor: ['#38bdf8', '#0284c7'],
+                        borderRadius: 4,
+                        barPercentage: 0.6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return '$' + context.parsed.y + ' Billion';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: {
+                                color: '#f1f5f9'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return '$' + value + 'B';
+                                }
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            }
+                        }
+                    }
+                }
+            });
+
+            const agentData = [
+                {
+                    id: 'orchestrator',
+                    icon: '&#129504;',
+                    title: 'Orchestrator & Dynamic Planner',
+                    short: 'The primary ADK coordinator utilizing declarative-intent logic.',
+                    desc: 'Processes structural text intents, evaluates student state analytics, dynamically drafts macro calendars, and shifts scheduling loads on the fly if a student shows immediate conceptual friction.',
+                    log: `> User Intent: "I have a physics test on thermodynamics in 48h and keep failing gas laws."\n> [Orchestrator] Intent parsed. Priority: HIGH. Timeframe: 48h.\n> [Orchestrator] Routing request to Vector Search...\n> [Orchestrator] Delegating sub-tasks to Pedagogical & Assessment Agents.`
+                },
+                {
+                    id: 'ingestion',
+                    icon: '&#128229;',
+                    title: 'Ingestion & Topology Agent',
+                    short: 'Parses raw MOE textbooks via vision-augmented pipelines.',
+                    desc: 'Transforms static PDFs into structured Markdown. Translates tables, charts, and mathematical layouts. Elements such as the ideal gas law (PV = nRT) are tagged explicitly for precise RAG querying.',
+                    log: `> [Ingestion] Loading: History_Sec3.pdf & Physics_Sec3.pdf\n> [Ingestion] Running Multimodal extraction (Gemini 1.5 Pro)...\n> [Ingestion] Success. Identified 42 core theorems.\n> [Ingestion] Extracted structural tag: { concept: "Ideal Gas Law", formula: "PV = nRT", context_id: "phys_ch4" }\n> [Ingestion] Pushing embeddings to Vertex AI.`
+                },
+                {
+                    id: 'pedagogy',
+                    icon: '&#128218;',
+                    title: 'Pedagogical Analysis Agent',
+                    short: 'The primary instructional designer mapping conceptual nodes.',
+                    desc: 'Monitors raw parsed documents to map prerequisites, core conceptual nodes, potential misconceptions, and contextual takeaways. Matches fragments with standard national testing targets.',
+                    log: `> [Pedagogy] Analyzing context_id: "phys_ch4"\n> [Pedagogy] Warning: High historic failure rate on Volume vs Pressure inverse relationships.\n> [Pedagogy] Action: Generating simplified summary emphasizing Boyle's Law.\n> [Pedagogy] Routing summary generation to Flash Lite guardrails...`
+                },
+                {
+                    id: 'assessment',
+                    icon: '&#128202;',
+                    title: 'Diagnostic Assessment Agent',
+                    short: 'Dynamically designs interactive quizzes and tracks telemetry.',
+                    desc: 'Creates contextual multi-tier questions. Tracks scoring trajectory, isolates precise algorithmic failure models (e.g., missing trigonometry vs missing physics properties), and writes to the student data stack.',
+                    log: `> [Assessment] Generating 5-question module for "Thermodynamics in 48h"\n> [Assessment] User Score: 2/5.\n> [Assessment] Telemetry flagged: Mathematical failure in isolating 'T' in 'PV=nRT'.\n> [Assessment] Updating user state matrix.\n> [Assessment] Alerting Orchestrator to adjust study plan.`
+                },
+                {
+                    id: 'audiovisual',
+                    icon: '&#127908;',
+                    title: 'Audio-Visual Synthesis Agent',
+                    short: 'Coordinates TTS/STT media pipelines for multimodal learning.',
+                    desc: 'Takes synthesized review blocks to produce high-fidelity downloadable summaries. Listens to spoken student answers during mock oral examinations, evaluating pronunciation and confidence.',
+                    log: `> [AV_Synth] Received text payload for Chapter 4 summary.\n> [AV_Synth] Initializing Text-to-Speech (Target Accent: Egyptian Arabic).\n> [AV_Synth] Audio artifact generated: audio_sum_ch4.mp3\n> [AV_Synth] Awaiting STT stream for interactive mock oral exam...`
+                }
+            ];
+
+            const agentListContainer = document.getElementById('agent-list');
+            const titleEl = document.getElementById('active-agent-title');
+            const descEl = document.getElementById('active-agent-desc');
+            const logEl = document.getElementById('active-agent-log');
+
+            const renderAgentDetails = (agent) => {
+                document.querySelectorAll('.agent-card').forEach(c => c.classList.remove('active', 'border-sky-500', 'bg-sky-50'));
+                document.getElementById(`card-${agent.id}`).classList.add('active', 'border-sky-500', 'bg-sky-50');
+
+                titleEl.innerHTML = `<span class="mr-3 text-2xl">${agent.icon}</span> ${agent.title}`;
+                descEl.innerText = agent.desc;
+                
+                logEl.innerHTML = '';
+                const lines = agent.log.split('\n');
+                let i = 0;
+                const typeLine = () => {
+                    if (i < lines.length) {
+                        const div = document.createElement('div');
+                        div.className = 'mb-1 opacity-0 transition-opacity duration-300';
+                        
+                        let text = lines[i];
+                        if(text.includes('HIGH') || text.includes('Warning') || text.includes('Alerting') || text.includes('failure')) {
+                            text = text.replace(/(HIGH|Warning|Alerting|failure)/g, '<span class="text-amber-400">$1</span>');
+                        }
+                        if(text.includes('Success') || text.includes('generated')) {
+                            text = text.replace(/(Success|generated)/g, '<span class="text-green-400">$1</span>');
+                        }
+
+                        div.innerHTML = text;
+                        logEl.appendChild(div);
+                        
+                        setTimeout(() => div.classList.remove('opacity-0'), 10);
+                        
+                        logEl.parentElement.scrollTop = logEl.parentElement.scrollHeight;
+                        i++;
+                        setTimeout(typeLine, 400);
+                    }
+                };
+                typeLine();
+            };
+
+            agentData.forEach((agent, index) => {
+                const card = document.createElement('div');
+                card.id = `card-${agent.id}`;
+                card.className = `agent-card p-4 rounded-lg border border-slate-200 bg-white shadow-sm flex items-start ${index === 0 ? 'active border-sky-500 bg-sky-50' : ''}`;
+                card.innerHTML = `
+                    <div class="text-3xl mr-4 mt-1">${agent.icon}</div>
+                    <div>
+                        <h4 class="font-bold text-slate-800 text-sm">${agent.title}</h4>
+                        <p class="text-xs text-slate-500 mt-1">${agent.short}</p>
+                    </div>
+                `;
+                card.addEventListener('click', () => renderAgentDetails(agent));
+                agentListContainer.appendChild(card);
+            });
+
+            renderAgentDetails(agentData[0]);
+        });
+    </script>
+</body>
+</html>
