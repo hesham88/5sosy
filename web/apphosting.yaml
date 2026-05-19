@@ -30,15 +30,14 @@ env:
     value: G-LDTVR4FPHV
     availability: [BUILD, RUNTIME]
 
-  # NEXT_PUBLIC_AGENTS_BASE_URL — add back once Cloud Run ADK service is deployed:
-  #   - variable: NEXT_PUBLIC_AGENTS_BASE_URL
-  #     value: https://5sosy-agents-<hash>-uc.a.run.app
-  #     availability: [BUILD, RUNTIME]
-  #
-  # AGENTS_SERVICE_TOKEN — provision in Secret Manager first:
-  #   firebase apphosting:secrets:set AGENTS_SERVICE_TOKEN
-  # Then add:
-  #   - variable: AGENTS_SERVICE_TOKEN
-  #     secret: AGENTS_SERVICE_TOKEN
-  #     availability: [RUNTIME]
-  # Until those exist, /api/agents/* falls back to simulated payloads.
+  # 5sosybot agents service (Cloud Run, project khsosy/us-east4).
+  - variable: AGENTS_BASE_URL
+    value: https://fivesosybot-ujeiecpdja-uk.a.run.app
+    availability: [RUNTIME]
+  - variable: AGENTS_API_KEY
+    secret: fivesosybot-api-key
+    availability: [RUNTIME]
+
+  # Legacy 5-agent stack (orchestrator/ingestion/pedagogy/assessment/av) — still
+  # falls back to simulated payloads until the production agents land.
+  # When ready, set NEXT_PUBLIC_AGENTS_BASE_URL and AGENTS_SERVICE_TOKEN here.

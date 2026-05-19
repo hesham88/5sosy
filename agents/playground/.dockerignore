@@ -1,0 +1,12 @@
+.venv/
+.env
+.env.*
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.adk/
+.git/
+.gitignore
+README.md.bak
+*.log

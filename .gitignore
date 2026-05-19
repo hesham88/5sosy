@@ -51,3 +51,16 @@ static_prototype/
 *.mp4
 *.zip
 Meshy_AI_extract_*
+
+# Folders excluded from this repo (may contain sensitive or unrelated content)
+5sosy_3dmodel/
+claude_prototype/
+docs/
+log/
+md/
+screenshots/
+5sosy.code-workspace
+
+# Firebase tooling artifacts (auto-generated, not source)
+web/.agents/
+web/skills-lock.json

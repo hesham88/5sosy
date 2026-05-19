@@ -1,0 +1,31 @@
+[project]
+name = "fivesosy-playground"
+version = "0.1.0"
+description = "5sosybot POC — orchestrator + executor with grounded Google Search via ADK"
+requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+
+dependencies = [
+    "google-adk>=1.0.0",
+    "google-genai>=0.5.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.9.0",
+    "python-dotenv>=1.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.7.0",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["orchestrator_agent*", "executor_agent*", "shared*"]
