@@ -432,27 +432,59 @@ def _seed_status_running() -> None:
 
 def _launch_sync_job() -> str:
     """Trigger a fresh Cloud Run Job execution. Returns the full execution
-    resource name (projects/.../executions/<id>)."""
+    resource name, or empty string if we can't recover it from the LRO
+    metadata. The Job container writes its own CLOUD_RUN_EXECUTION env var
+    into Firestore on startup, so an empty return is recoverable."""
     client = run_v2.JobsClient()
     operation = client.run_job(name=_sync_job_resource())
-    # The Job execution is created immediately; we don't wait for the
-    # container to finish — that's the whole point.
-    execution = operation.metadata.execution if operation.metadata else None
-    if execution and getattr(execution, "name", None):
-        return execution.name
-    # Fall back to peeking at the operation name if metadata isn't populated.
-    return getattr(operation, "name", "") or ""
+
+    # operation.metadata is an Execution proto from run_v2.types — try its
+    # name directly. If it's not populated yet, list executions for the job
+    # and pick the most recently created one.
+    try:
+        meta = operation.metadata
+        if meta is not None:
+            name = getattr(meta, "name", "") or ""
+            if name:
+                return name
+    except Exception as exc:  # noqa: BLE001
+        print(f"_launch_sync_job: could not read operation.metadata.name: {exc}")
+
+    try:
+        ec = run_v2.ExecutionsClient()
+        latest = None
+        for execution in ec.list_executions(parent=_sync_job_resource()):
+            if latest is None or execution.create_time > latest.create_time:
+                latest = execution
+        if latest is not None:
+            return latest.name
+    except Exception as exc:  # noqa: BLE001
+        print(f"_launch_sync_job: could not list executions: {exc}")
+
+    return ""
+
+
+def _ensure_execution_path(execution_name: str) -> str:
+    """Accept a full execution resource path OR a short id and return the
+    full path. The Job container only knows its own short id (from the
+    CLOUD_RUN_EXECUTION env var), but cancel_execution wants the full path."""
+    if not execution_name:
+        return ""
+    if execution_name.startswith("projects/"):
+        return execution_name
+    return f"{_sync_job_resource()}/executions/{execution_name}"
 
 
 def _cancel_sync_execution(execution_name: str) -> bool:
-    if not execution_name:
+    full = _ensure_execution_path(execution_name)
+    if not full:
         return False
     try:
         client = run_v2.ExecutionsClient()
-        client.cancel_execution(name=execution_name)
+        client.cancel_execution(name=full)
         return True
     except Exception as exc:  # noqa: BLE001
-        print(f"Failed to cancel execution {execution_name}: {exc}")
+        print(f"Failed to cancel execution {full}: {exc}")
         return False
 
 
@@ -488,6 +520,9 @@ async def ingestion_sync(
                 None, _launch_sync_job
             )
         except Exception as exc:  # noqa: BLE001
+            # The Cloud Run Jobs API call itself failed (auth, quota, missing
+            # job, etc). Roll the eager seed back so the UI doesn't show a
+            # phantom "running" state.
             status_ref.update(
                 {
                     "status": "error",
@@ -497,12 +532,13 @@ async def ingestion_sync(
             )
             raise HTTPException(status_code=500, detail=f"Failed to launch sync job: {exc}")
 
-        status_ref.update(
-            {
-                "executionName": execution_name,
-                "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
-            }
-        )
+        # An empty execution_name is fine — the Job container writes its own
+        # CLOUD_RUN_EXECUTION env var into ingestion/status on startup. We
+        # still update the heartbeat so the UI's staleness check resets.
+        update_fields: dict = {"lastHeartbeatAt": firestore.SERVER_TIMESTAMP}
+        if execution_name:
+            update_fields["executionName"] = execution_name
+        status_ref.update(update_fields)
         return {
             "ok": True,
             "status": "running",
@@ -530,8 +566,16 @@ async def ingestion_sync(
                 None, _launch_sync_job
             )
         except Exception as exc:  # noqa: BLE001
+            status_ref.update(
+                {
+                    "status": "error",
+                    "errorMessage": f"Failed to launch sync job: {exc}",
+                    "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
+                }
+            )
             raise HTTPException(status_code=500, detail=f"Failed to launch sync job: {exc}")
-        status_ref.update({"executionName": execution_name})
+        if execution_name:
+            status_ref.update({"executionName": execution_name})
         return {
             "ok": True,
             "status": "running",

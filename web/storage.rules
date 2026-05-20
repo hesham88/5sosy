@@ -6,10 +6,13 @@ service firebase.storage {
     match /curriculum/{allPaths=**}    { allow read: if true;  allow write: if false; }
     match /audio-summaries/{allPaths=**} { allow read: if true; allow write: if false; }
 
-    // Per-user textbook uploads (PDFs etc) — owner only
+    // Per-user textbook uploads (PDFs etc) — owner only.
+    // Split rules: size check only applies to writes (request.resource is null on reads,
+    // and `null < 50MB` evaluates false, denying every download including getDownloadURL).
     match /users/{uid}/uploads/{allPaths=**} {
-      allow read, write: if request.auth != null && request.auth.uid == uid
-                         && request.resource.size < 50 * 1024 * 1024;
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if request.auth != null && request.auth.uid == uid
+                    && request.resource.size < 50 * 1024 * 1024;
     }
 
     // Per-user generated artifacts (reports, oral exam recordings)
