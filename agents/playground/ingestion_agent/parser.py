@@ -187,7 +187,7 @@ async def ocr_pages_with_gemini(pages_json: str) -> str:
 
 # --- 3. Firestore Indexer ---
 
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "gemini-embedding-001")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "gemini-embedding-2")
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "3072"))
 
 
