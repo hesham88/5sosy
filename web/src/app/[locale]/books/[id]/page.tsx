@@ -2,7 +2,7 @@
 
 import { use, useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { collection, doc, getDoc, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { getFirebase } from '@/lib/firebase/client';
 import { ChromeLayout } from '@/components/shared/Chrome';
 import { useApp } from '@/components/shared/Providers';
@@ -34,37 +34,72 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
   useEffect(() => {
     const { db } = getFirebase();
     const bookRef = doc(db, 'books', id);
-    
-    const unsub = onSnapshot(bookRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        setBook({
-          id: snapshot.id,
-          subject: (data.subject as SubjectId) || 'physics',
-          arT: data.title || data.subject,
-          enT: data.title || data.subject,
-          arSub: `${data.stage || ''} - ${data.grade || ''} (${data.term || ''})`,
-          enSub: `${data.stage || ''} - ${data.grade || ''} (${data.term || ''})`,
-          publisher: data.distributor || data.author || 'MOE',
-          year: data.year || 2026,
-          chapters: data.chapters || 0,
-          pages: data.pages || 0,
-          status: data.status || 'indexed',
-          mastery: 0,
-          cover: '',
-          type: data.type || 'Student Book'
-        });
-        
-        // Load pagesList
-        if (data.pagesList && Array.isArray(data.pagesList)) {
-          // Sort pages by pageNumber ascending
-          const sortedPages = [...data.pagesList].sort((a, b) => a.pageNumber - b.pageNumber);
-          setPages(sortedPages);
-        }
-      } else {
+
+    const unsub = onSnapshot(bookRef, async (snapshot) => {
+      if (!snapshot.exists()) {
         setBook(null);
+        setLoading(false);
+        return;
       }
-      setLoading(false);
+      const data = snapshot.data();
+      setBook({
+        id: snapshot.id,
+        subject: (data.subject as SubjectId) || 'physics',
+        arT: data.title || data.subject,
+        enT: data.title || data.subject,
+        arSub: `${data.stage || ''} - ${data.grade || ''} (${data.term || ''})`,
+        enSub: `${data.stage || ''} - ${data.grade || ''} (${data.term || ''})`,
+        publisher: data.distributor || data.author || 'MOE',
+        year: data.year || 2026,
+        chapters: data.chapters || 0,
+        pages: data.pages || 0,
+        status: data.status || 'indexed',
+        mastery: 0,
+        cover: '',
+        type: data.type || 'Student Book',
+      });
+
+      // Pages source preference order:
+      //   1. New: `books/{id}/content/full.pagesList` — written by lean indexer
+      //   2. Legacy: `books/{id}.pagesList` — old bloated main-doc field
+      //   3. Fallback: `books/{id}/pages/{pageN}` subcollection (each doc one page)
+      try {
+        let loaded: { pageNumber: number; text: string }[] = [];
+
+        const contentSnap = await getDoc(doc(db, 'books', id, 'content', 'full'));
+        if (contentSnap.exists()) {
+          const c = contentSnap.data();
+          if (Array.isArray(c.pagesList)) {
+            loaded = c.pagesList as { pageNumber: number; text: string }[];
+          }
+        }
+
+        if (loaded.length === 0 && Array.isArray(data.pagesList)) {
+          loaded = data.pagesList as { pageNumber: number; text: string }[];
+        }
+
+        if (loaded.length === 0) {
+          const pagesQ = query(
+            collection(db, 'books', id, 'pages'),
+            orderBy('pageNumber', 'asc')
+          );
+          const pagesSnap = await getDoc(doc(db, 'books', id)); // priming, ignored
+          void pagesSnap;
+          const { getDocs } = await import('firebase/firestore');
+          const qSnap = await getDocs(pagesQ);
+          loaded = qSnap.docs.map((d) => {
+            const pd = d.data();
+            return { pageNumber: pd.pageNumber as number, text: (pd.text as string) || '' };
+          });
+        }
+
+        loaded.sort((a, b) => (a.pageNumber || 0) - (b.pageNumber || 0));
+        setPages(loaded);
+      } catch (e) {
+        console.error('Failed to load book pages:', e);
+      } finally {
+        setLoading(false);
+      }
     });
 
     return () => unsub();

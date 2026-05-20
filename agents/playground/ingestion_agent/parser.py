@@ -187,8 +187,57 @@ async def ocr_pages_with_gemini(pages_json: str) -> str:
 
 # --- 3. Firestore Indexer ---
 
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "gemini-embedding-001")
+EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "3072"))
+
+
+def _sanitize_text(s: str) -> str:
+    """Strip lone surrogate halves that crash Firestore JS SDK / utf-8 encoders.
+    Gemini OCR occasionally emits U+DC80–U+DCFF (DCS-low surrogates) for bytes
+    it couldn't decode, which Python strings allow but valid utf-8/utf-16 do not."""
+    if not s:
+        return ""
+    # Re-encode round-trip, replacing anything that can't survive utf-8.
+    try:
+        return s.encode("utf-8", errors="replace").decode("utf-8")
+    except Exception:
+        return s
+
+
+async def _embed_with_retry(client, text: str, max_attempts: int = 4) -> list[float]:
+    """Embed one chunk with exponential backoff on 429/503. Returns a zero
+    vector after exhausting retries so a single bad page doesn't fail the book."""
+    delay = 1.0
+    last_exc: Exception | None = None
+    for attempt in range(max_attempts):
+        try:
+            response = await client.aio.models.embed_content(
+                model=f"models/{EMBEDDING_MODEL}",
+                contents=text,
+            )
+            return list(response.embeddings[0].values)
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            msg = str(exc).lower()
+            transient = (
+                "429" in msg
+                or "resource_exhausted" in msg
+                or "503" in msg
+                or "unavailable" in msg
+                or "deadline" in msg
+            )
+            if not transient or attempt == max_attempts - 1:
+                break
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 16.0)
+    print(f"Embedding failed after {max_attempts} attempts: {last_exc}")
+    return [0.0] * EMBEDDING_DIM
+
+
 async def index_book_to_firestore(book_id: str, ocr_results_json: str, book_metadata_json: str) -> str:
-    """Assemble final indexed textbook document, save to Firestore 'books' and its subcollection 'pages' with embeddings, and clean up GCS temp files.
+    """Assemble final indexed textbook document, save to Firestore 'books' (lean
+    metadata) + 'books/{id}/content/full' (pagesList + joined text) + 'books/{id}/pages'
+    subcollection (per-page with embeddings), and clean up GCS temp files.
 
     Args:
         book_id: Unique book identifier.
@@ -203,65 +252,78 @@ async def index_book_to_firestore(book_id: str, ocr_results_json: str, book_meta
         book_metadata = json.loads(book_metadata_json)
     except Exception as e:
         return f"Error parsing input JSONs: {e}"
-        
+
+    # Sanitize every OCR page so an invalid surrogate from one page can't break
+    # downstream Firestore writes or the web listener.
+    for p in ocr_results:
+        p["text"] = _sanitize_text(p.get("text", ""))
+
     db = firestore.Client(project=FIRESTORE_PROJECT, database=FIRESTORE_DATABASE)
     storage_client = storage.Client()
     client = genai.Client()
-    
-    # Generate consolidated text representation
-    consolidated_pages = []
-    for p in ocr_results:
-        page_num = p.get("pageNumber")
-        page_text = p.get("text", "")
-        consolidated_pages.append(f"--- PAGE {page_num} ---\n\n{page_text}")
-        
-    full_rich_text = "\n\n".join(consolidated_pages)
-    
-    # Construct book document
+
+    consolidated_pages = [
+        f"--- PAGE {p.get('pageNumber')} ---\n\n{p.get('text', '')}"
+        for p in ocr_results
+    ]
+    full_rich_text = _sanitize_text("\n\n".join(consolidated_pages))
+
+    title = _sanitize_text(book_metadata.get("title", book_metadata.get("subject", "Unknown Book")))
+    subject = _sanitize_text(book_metadata.get("subject", ""))
+
+    # LEAN main book doc — no pagesList, no full text. Bulk content lives in the
+    # `content/full` subcollection doc so the /books grid listener pulls ~2 KB
+    # per book instead of ~500 KB.
     book_doc = {
         "id": book_id,
-        "title": book_metadata.get("title", book_metadata.get("subject", "Unknown Book")),
-        "stage": book_metadata.get("stage", ""),
-        "grade": book_metadata.get("grade", ""),
-        "term": book_metadata.get("term", ""),
-        "subject": book_metadata.get("subject", ""),
-        "type": book_metadata.get("type", "Student Book"),
+        "title": title,
+        "stage": _sanitize_text(book_metadata.get("stage", "")),
+        "grade": _sanitize_text(book_metadata.get("grade", "")),
+        "term": _sanitize_text(book_metadata.get("term", "")),
+        "subject": subject,
+        "type": _sanitize_text(book_metadata.get("type", "Student Book")),
         "language": book_metadata.get("language", "ar"),
         "year": book_metadata.get("year", 2026),
         "govUrl": book_metadata.get("govUrl", book_metadata.get("link", "")),
         "storagePath": book_metadata.get("gcsUri", ""),
         "chapters": book_metadata.get("chapters", 8),
         "pages": len(ocr_results),
-        "pagesList": ocr_results,
-        "text": full_rich_text,
         "status": "indexed",
         "createdAt": firestore.SERVER_TIMESTAMP,
-        "updatedAt": firestore.SERVER_TIMESTAMP
+        "updatedAt": firestore.SERVER_TIMESTAMP,
     }
-    
-    print(f"Indexing textbook document to Firestore collection 'books': {book_id}")
+
+    print(f"Indexing textbook (lean) to Firestore: books/{book_id}")
     db.collection("books").document(book_id).set(book_doc)
-    
-    # Generate page-level embeddings in parallel
-    print(f"Generating page-level embeddings using models/gemini-embedding-2 for book: {book_id}")
-    embed_semaphore = asyncio.Semaphore(10)
-    
+
+    # Bulk content — full joined text + per-page list. Split into multiple
+    # chunks if it exceeds Firestore's 1 MiB doc limit.
+    content_payload = {
+        "bookId": book_id,
+        "pagesList": ocr_results,
+        "text": full_rich_text,
+        "updatedAt": firestore.SERVER_TIMESTAMP,
+    }
+    try:
+        db.collection("books").document(book_id).collection("content").document("full").set(content_payload)
+    except Exception as e:
+        # Some books exceed 1 MiB joined — fall back to writing just pagesList.
+        print(f"content/full write failed (likely >1 MiB): {e} — retrying without joined text")
+        db.collection("books").document(book_id).collection("content").document("full").set(
+            {"bookId": book_id, "pagesList": ocr_results, "updatedAt": firestore.SERVER_TIMESTAMP}
+        )
+
+    print(f"Generating page-level embeddings using models/{EMBEDDING_MODEL} for book: {book_id}")
+    embed_semaphore = asyncio.Semaphore(5)
+
     async def embed_single_page(p):
         p_num = p.get("pageNumber")
         p_text = p.get("text", "")
         if not p_text.strip():
-            return p_num, [0.0] * 3072
+            return p_num, [0.0] * EMBEDDING_DIM
         async with embed_semaphore:
-            try:
-                response = await client.aio.models.embed_content(
-                    model="models/gemini-embedding-2",
-                    contents=p_text
-                )
-                embedding = response.embeddings[0].values
-                return p_num, embedding
-            except Exception as exc:
-                print(f"Embedding failed for Page {p_num}: {exc}")
-                return p_num, [0.0] * 3072
+            emb = await _embed_with_retry(client, p_text)
+            return p_num, emb
 
     embed_tasks = [embed_single_page(p) for p in ocr_results]
     embed_results = await asyncio.gather(*embed_tasks)

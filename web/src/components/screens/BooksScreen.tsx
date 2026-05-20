@@ -78,8 +78,11 @@ export default function BooksScreen() {
         statusDoc,
         (snapshot) => {
           if (snapshot.exists()) {
-            setSyncStatus(snapshot.data() as IngestionStatus);
+            const data = snapshot.data() as IngestionStatus;
+            console.info('[sync status]', data.status, `${data.downloadedBooks}/${data.totalBooks}`, `exec=${data.executionName || '?'}`);
+            setSyncStatus(data);
           } else {
+            console.info('[sync status] doc does not exist');
             setSyncStatus(null);
           }
         },
@@ -91,34 +94,49 @@ export default function BooksScreen() {
         booksCol,
         (snapshot) => {
           const list: Book[] = [];
+          let badDocs = 0;
           snapshot.forEach((d) => {
-            const data = d.data();
-            list.push({
-              id: d.id,
-              subject: (data.subject as SubjectId) || 'physics',
-              arT: data.title || data.subject,
-              enT: data.title || data.subject,
-              arSub: `${data.stage || ''} - ${data.grade || ''} (${data.term || ''})`,
-              enSub: `${data.stage || ''} - ${data.grade || ''} (${data.term || ''})`,
-              publisher: data.distributor || data.author || 'MOE',
-              year: data.year || 2026,
-              chapters: data.chapters || 0,
-              pages: data.pages || 0,
-              status: data.status || 'indexed',
-              mastery: 0,
-              cover: '',
-              type: data.type || 'Student Book',
-              _createdAtMs:
-                typeof data.createdAt?.toMillis === 'function' ? data.createdAt.toMillis() : 0,
-            } as Book & { _createdAtMs: number });
+            try {
+              const data = d.data();
+              const title = data.title || data.subject || d.id;
+              list.push({
+                id: d.id,
+                subject: (data.subject as SubjectId) || 'physics',
+                arT: title,
+                enT: title,
+                arSub: `${data.stage || ''} - ${data.grade || ''} (${data.term || ''})`,
+                enSub: `${data.stage || ''} - ${data.grade || ''} (${data.term || ''})`,
+                publisher: data.distributor || data.author || 'MOE',
+                year: data.year || 2026,
+                chapters: data.chapters || 0,
+                pages: data.pages || 0,
+                status: data.status || 'indexed',
+                mastery: 0,
+                cover: '',
+                type: data.type || 'Student Book',
+                _createdAtMs:
+                  typeof data.createdAt?.toMillis === 'function' ? data.createdAt.toMillis() : 0,
+              } as Book & { _createdAtMs: number });
+            } catch (mapErr) {
+              badDocs += 1;
+              console.warn('[books listener] skipped malformed doc', d.id, mapErr);
+            }
           });
+          if (badDocs > 0) {
+            console.warn(`[books listener] skipped ${badDocs}/${snapshot.size} malformed docs`);
+          }
           // Newest first; books without createdAt land last in deterministic title order.
           list.sort((a, b) => {
             const aMs = (a as Book & { _createdAtMs?: number })._createdAtMs ?? 0;
             const bMs = (b as Book & { _createdAtMs?: number })._createdAtMs ?? 0;
             if (aMs !== bMs) return bMs - aMs;
-            return a.arT.localeCompare(b.arT);
+            try {
+              return (a.arT || '').localeCompare(b.arT || '');
+            } catch {
+              return 0;
+            }
           });
+          console.info(`[books listener] received ${snapshot.size} docs, mapped ${list.length}`);
           setDbBooks(list);
           setBooksLoading(false);
         },

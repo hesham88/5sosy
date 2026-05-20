@@ -90,14 +90,21 @@ def clean_path_segment(seg: str) -> str:
     return seg.strip()
 
 def get_book_id(gov_url: str, subject: str = "book") -> str:
+    """Build a stable, COLLISION-FREE id from the gov URL. The earlier version
+    stripped grade/term suffixes from the filename and produced colliding ids
+    across grades (e.g. english_prim1.pdf and english_prim2.pdf both → english-en-2026),
+    causing one Firestore doc to be repeatedly overwritten. We now keep the
+    clean-name slug for readability but append a short hash of the full URL
+    to guarantee uniqueness."""
+    short_hash = hashlib.md5(gov_url.encode("utf-8")).hexdigest()[:8]
     try:
         path = urllib.parse.urlparse(gov_url).path
         filename = path.split('/')[-1]
         name_without_ext = filename.rsplit('.', 1)[0]
-        
+
         year_match = re.search(r'/(\d{4})/', gov_url)
         year = year_match.group(1) if year_match else "2026"
-        
+
         lang = "ar"
         sub_lower = subject.lower()
         filename_lower = name_without_ext.lower()
@@ -111,7 +118,7 @@ def get_book_id(gov_url: str, subject: str = "book") -> str:
             lang = "it"
         elif "español" in sub_lower or "الاسبانية" in sub_lower or "spanish" in sub_lower:
             lang = "es"
-            
+
         clean_name = name_without_ext
         clean_name = re.sub(r'_(FR|AR|EN|F|E|ARABIC|FRENCH|ENGLISH)(?=\b|_)', '', clean_name, flags=re.IGNORECASE)
         clean_name = re.sub(r'_(prim\d+|prepratory\d+|sec\d+|prep\d+|\d+secondary|\d+prep|\d+prim|\d+|kg\d+|secondary\d+)(?=\b|_)', '', clean_name, flags=re.IGNORECASE)
@@ -120,10 +127,9 @@ def get_book_id(gov_url: str, subject: str = "book") -> str:
         clean_name = clean_name.replace('_', '-').strip('-')
         if not clean_name:
             clean_name = "book"
-        return f"{clean_name.lower()}-{lang}-{year}"
+        return f"{clean_name.lower()}-{lang}-{year}-{short_hash}"
     except Exception:
-        import hashlib
-        return hashlib.md5(gov_url.encode("utf-8")).hexdigest()
+        return short_hash
 
 async def download_pdf(url: str) -> bytes:
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -207,9 +213,21 @@ async def run_sync_pipeline(
             })
             return
             
-        books_coll = db.collection("books").stream()
-        indexed_book_ids = {doc.id for doc in books_coll}
-        
+        # Resume support: harvest the set of already-fully-indexed book ids so
+        # the loop can skip them. We check both at startup (here) and per-book
+        # below — the per-book check is the source of truth in case another
+        # execution wrote a book mid-run.
+        indexed_book_ids = set()
+        for doc in db.collection("books").stream():
+            data = doc.to_dict() or {}
+            if data.get("status") == "indexed" and (data.get("pages") or 0) > 0:
+                indexed_book_ids.add(doc.id)
+        append_log(
+            logs,
+            f"Resume scan: {len(indexed_book_ids)} books already indexed — will skip them.",
+            "info",
+        )
+
         bucket = storage_client.bucket(bucket_name)
         
         books_list = status_data.get("booksList", {})
@@ -262,6 +280,29 @@ async def run_sync_pipeline(
 
             if books_list.get(b_id, {}).get("status") == "completed":
                 continue
+
+            # Per-iteration resume check: another execution (or a prior partial
+            # run) may have already finished this book. Fetch the doc fresh so
+            # we don't redo expensive OCR work just because booksList is stale.
+            existing = db.collection("books").document(b_id).get()
+            if existing.exists:
+                exdata = existing.to_dict() or {}
+                if exdata.get("status") == "indexed" and (exdata.get("pages") or 0) > 0:
+                    books_list[b_id] = {
+                        **books_list.get(b_id, {}),
+                        "status": "completed",
+                        "progress": 100,
+                    }
+                    completed_count = len([b for b in books_list.values() if b.get("status") == "completed"])
+                    percentage = round((completed_count / total_books) * 100, 1)
+                    status_ref.update({
+                        "downloadedBooks": completed_count,
+                        "parsedBooks": completed_count,
+                        "percentage": percentage,
+                        "booksList": books_list,
+                        "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
+                    })
+                    continue
 
             b_title = book.get("subject", "Unknown Subject")
             append_log(logs, f"Processing book {idx+1}/{total_books}: {b_title} ({book.get('grade')})", "info")
