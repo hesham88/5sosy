@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { collection, doc, onSnapshot, deleteDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { getFirebase } from '@/lib/firebase/client';
 import { useAuth } from '@/lib/firebase/auth-context';
@@ -45,6 +45,9 @@ export default function BooksScreen() {
 
   const [syncStatus, setSyncStatus] = useState<IngestionStatus | null>(null);
   const [dbBooks, setDbBooks] = useState<Book[]>([]);
+  const [booksLoading, setBooksLoading] = useState(true);
+  const [syncStarting, setSyncStarting] = useState(false);
+  const [nowTick, setNowTick] = useState(() => Date.now());
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -71,38 +74,59 @@ export default function BooksScreen() {
     try {
       const { db } = getFirebase();
       const statusDoc = doc(db, 'ingestion', 'status');
-      const unsubStatus = onSnapshot(statusDoc, (snapshot) => {
-        if (snapshot.exists()) {
-          setSyncStatus(snapshot.data() as IngestionStatus);
-        } else {
-          setSyncStatus(null);
-        }
-      });
+      const unsubStatus = onSnapshot(
+        statusDoc,
+        (snapshot) => {
+          if (snapshot.exists()) {
+            setSyncStatus(snapshot.data() as IngestionStatus);
+          } else {
+            setSyncStatus(null);
+          }
+        },
+        (err) => console.error('ingestion/status listener failed:', err)
+      );
 
       const booksCol = collection(db, 'books');
-      const unsubBooks = onSnapshot(booksCol, (snapshot) => {
-        const list: Book[] = [];
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          list.push({
-            id: doc.id,
-            subject: (data.subject as SubjectId) || 'physics',
-            arT: data.title || data.subject,
-            enT: data.title || data.subject,
-            arSub: `${data.stage || ''} - ${data.grade || ''} (${data.term || ''})`,
-            enSub: `${data.stage || ''} - ${data.grade || ''} (${data.term || ''})`,
-            publisher: data.distributor || data.author || 'MOE',
-            year: data.year || 2026,
-            chapters: data.chapters || 0,
-            pages: data.pages || 0,
-            status: data.status || 'indexed',
-            mastery: 0,
-            cover: '',
-            type: data.type || 'Student Book'
+      const unsubBooks = onSnapshot(
+        booksCol,
+        (snapshot) => {
+          const list: Book[] = [];
+          snapshot.forEach((d) => {
+            const data = d.data();
+            list.push({
+              id: d.id,
+              subject: (data.subject as SubjectId) || 'physics',
+              arT: data.title || data.subject,
+              enT: data.title || data.subject,
+              arSub: `${data.stage || ''} - ${data.grade || ''} (${data.term || ''})`,
+              enSub: `${data.stage || ''} - ${data.grade || ''} (${data.term || ''})`,
+              publisher: data.distributor || data.author || 'MOE',
+              year: data.year || 2026,
+              chapters: data.chapters || 0,
+              pages: data.pages || 0,
+              status: data.status || 'indexed',
+              mastery: 0,
+              cover: '',
+              type: data.type || 'Student Book',
+              _createdAtMs:
+                typeof data.createdAt?.toMillis === 'function' ? data.createdAt.toMillis() : 0,
+            } as Book & { _createdAtMs: number });
           });
-        });
-        setDbBooks(list);
-      });
+          // Newest first; books without createdAt land last in deterministic title order.
+          list.sort((a, b) => {
+            const aMs = (a as Book & { _createdAtMs?: number })._createdAtMs ?? 0;
+            const bMs = (b as Book & { _createdAtMs?: number })._createdAtMs ?? 0;
+            if (aMs !== bMs) return bMs - aMs;
+            return a.arT.localeCompare(b.arT);
+          });
+          setDbBooks(list);
+          setBooksLoading(false);
+        },
+        (err) => {
+          console.error('books listener failed:', err);
+          setBooksLoading(false);
+        }
+      );
 
       return () => {
         unsubStatus();
@@ -110,10 +134,18 @@ export default function BooksScreen() {
       };
     } catch (e) {
       console.error('Firebase snapshot initialization error:', e);
+      setBooksLoading(false);
     }
   }, []);
 
-  const triggerSyncCommand = async (command: 'start' | 'pause' | 'resume' | 'reset') => {
+  // Re-evaluate heartbeat staleness every 10s for the liveness banner.
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 10_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const triggerSyncCommand = async (command: 'start' | 'pause' | 'resume' | 'reset' | 'kill') => {
+    if (command === 'start') setSyncStarting(true);
     try {
       const res = await fetch('/api/agents/ingestion', {
         method: 'POST',
@@ -121,12 +153,30 @@ export default function BooksScreen() {
         body: JSON.stringify({ command }),
       });
       if (!res.ok) {
-        console.error('Failed to trigger sync command:', command);
+        const errBody = await res.json().catch(() => ({}));
+        console.error('Failed to trigger sync command:', command, errBody);
       }
     } catch (err) {
       console.error('Error triggering sync command:', err);
+    } finally {
+      // Keep the "starting" pill up briefly so the user sees feedback even if
+      // the eager-seed Firestore write arrives within ~100ms.
+      if (command === 'start') setTimeout(() => setSyncStarting(false), 1500);
     }
   };
+
+  // Liveness staleness — true when the Job has stopped heartbeating for >90s.
+  const heartbeatMs = (() => {
+    const v = syncStatus?.lastHeartbeatAt as { toMillis?: () => number } | undefined | null;
+    return v && typeof v.toMillis === 'function' ? v.toMillis() : 0;
+  })();
+  const syncIsStale =
+    syncStatus?.status === 'running' && heartbeatMs > 0 && nowTick - heartbeatMs > 90_000;
+
+  const executionShortId = syncStatus?.executionName?.split('/').pop() || '';
+  const executionLogsUrl = executionShortId
+    ? `https://console.cloud.google.com/run/jobs/executions/details/us-east4/${executionShortId}/logs?project=khsosy`
+    : '';
 
   useEffect(() => { if (subjectFromUrl) setSubjectFilter(subjectFromUrl); }, [subjectFromUrl]);
 
@@ -258,7 +308,7 @@ export default function BooksScreen() {
     setUploadProgress(0);
     setUploadError(null);
 
-    const { storage, db } = getFirebase();
+    const { storage } = getFirebase();
     const cleanTitle = newBookMeta.title.replace(/\s+/g, '-').toLowerCase();
     const bookId = `${cleanTitle}-${newBookMeta.language}-${newBookMeta.year}`;
     const storagePath = `users/${user.uid}/uploads/${bookId}/${uploadFile.name}`;
@@ -278,53 +328,91 @@ export default function BooksScreen() {
           setUploadError(error.message);
           setUploadProgress(null);
         },
-        async () => {
-          const downloadUrl = await getDownloadURL(uploadTask.snapshot.ref);
-          const gcsUri = `gs://${storage.app.options.storageBucket}/${storagePath}`;
+        () => {
+          // Wrap the async completion logic so a thrown promise can't strand
+          // the UI at 100%. Without this, getDownloadURL or the fetch
+          // rejecting would leave uploadProgress=100 forever.
+          (async () => {
+            try {
+              await getDownloadURL(uploadTask.snapshot.ref);
+              const gcsUri = `gs://${storage.app.options.storageBucket}/${storagePath}`;
 
-          // 2. Call parse-added API to trigger backend processing
-          const res = await fetch('/api/books/parse-added', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              bookId,
-              title: newBookMeta.title,
-              gcsUri,
-              stage: 'Secondary',
-              grade: newBookMeta.grade,
-              term: newBookMeta.term,
-              subject: newBookMeta.subject,
-              type: 'Added Book',
-              language: newBookMeta.language,
-              year: newBookMeta.year
-            })
-          });
+              const res = await fetch('/api/books/parse-added', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                  bookId,
+                  title: newBookMeta.title,
+                  gcsUri,
+                  stage: 'Secondary',
+                  grade: newBookMeta.grade,
+                  term: newBookMeta.term,
+                  subject: newBookMeta.subject,
+                  type: 'Added Book',
+                  language: newBookMeta.language,
+                  year: newBookMeta.year,
+                }),
+              });
 
-          if (res.ok) {
-            setUploadFile(null);
-            setUploadProgress(null);
-          } else {
-            const data = await res.json();
-            setUploadError(data.error || 'Parsing initiation failed');
-            setUploadProgress(null);
-          }
+              if (res.ok) {
+                setUploadFile(null);
+                setUploadProgress(null);
+              } else {
+                const data = await res.json().catch(() => ({}));
+                setUploadError(
+                  data.error ||
+                    (isAR ? 'فشل بدء المعالجة في الخادم.' : 'Parsing initiation failed.')
+                );
+                setUploadProgress(null);
+              }
+            } catch (err) {
+              console.error('Post-upload step failed:', err);
+              setUploadError(
+                err instanceof Error
+                  ? err.message
+                  : isAR
+                  ? 'تعذّر الاتصال بخدمة المعالجة.'
+                  : 'Could not reach the parsing service.'
+              );
+              setUploadProgress(null);
+            }
+          })();
         }
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error starting upload:', err);
-      setUploadError(err.message);
+      setUploadError(err instanceof Error ? err.message : 'Upload failed');
       setUploadProgress(null);
     }
   };
 
   const handleDeleteBook = async (bookId: string) => {
-    if (confirm(isAR ? 'هل تريد حذف هذا الكتاب فعلاً؟' : 'Are you sure you want to delete this book?')) {
-      const { db } = getFirebase();
-      try {
-        await deleteDoc(doc(db, 'books', bookId));
-      } catch (err) {
-        console.error('Failed to delete book:', err);
+    if (!confirm(isAR ? 'هل تريد حذف هذا الكتاب فعلاً؟' : 'Are you sure you want to delete this book?')) {
+      return;
+    }
+    if (!user) {
+      alert(isAR ? 'سجّل الدخول لحذف الكتاب.' : 'Sign in to delete this book.');
+      return;
+    }
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch('/api/books/delete', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ bookId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        console.error('Delete failed:', data);
+        alert(
+          (isAR ? 'تعذّر حذف الكتاب: ' : 'Failed to delete: ') + (data.error || res.statusText)
+        );
       }
+    } catch (err) {
+      console.error('Failed to delete book:', err);
     }
   };
 
@@ -375,7 +463,7 @@ export default function BooksScreen() {
                 </p>
               </div>
               
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 {syncStatus?.status === 'running' && (
                   <button
                     onClick={() => triggerSyncCommand('pause')}
@@ -395,18 +483,31 @@ export default function BooksScreen() {
                 {(syncStatus?.status === 'idle' || syncStatus?.status === 'completed' || syncStatus?.status === 'error' || !syncStatus) && (
                   <button
                     onClick={() => triggerSyncCommand('start')}
-                    className="px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold bg-slate-900 hover:bg-slate-800 text-white transition flex items-center gap-1.5 shadow-sm"
+                    disabled={syncStarting}
+                    className="px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold bg-slate-900 hover:bg-slate-800 text-white transition flex items-center gap-1.5 shadow-sm disabled:opacity-60"
                   >
-                    <span>🚀</span> {isAR ? 'بدء المزامنة' : 'Start Sync'}
+                    {syncStarting ? (
+                      <>
+                        <span className="animate-spin">⚙️</span> {isAR ? 'جاري البدء…' : 'Starting…'}
+                      </>
+                    ) : (
+                      <>
+                        <span>🚀</span> {isAR ? 'بدء المزامنة' : 'Start Sync'}
+                      </>
+                    )}
                   </button>
                 )}
-                
+
                 {syncStatus?.status === 'running' && (
                   <button
-                    onClick={() => triggerSyncCommand('reset')}
-                    className="px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold border border-rose-200 text-rose-600 hover:bg-rose-50 transition"
+                    onClick={() => {
+                      if (confirm(isAR ? 'هل تريد إيقاف المزامنة فوراً؟ الكتب المضافة حتى الآن ستبقى.' : 'Kill the running sync immediately? Books indexed so far are kept.')) {
+                        triggerSyncCommand('kill');
+                      }
+                    }}
+                    className="px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold bg-rose-600 hover:bg-rose-700 text-white transition flex items-center gap-1.5 shadow-sm"
                   >
-                    <span>🛑</span> {isAR ? 'إلغاء المزامنة' : 'Cancel Sync'}
+                    <span>⛔</span> {isAR ? 'إنهاء فوري' : 'Kill Job'}
                   </button>
                 )}
 
@@ -424,6 +525,68 @@ export default function BooksScreen() {
                 )}
               </div>
             </div>
+
+            {/* Execution metadata + Cloud Logging deep-link */}
+            {(executionShortId || syncStatus?.status === 'running') && (
+              <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500 mb-3 ltr">
+                {executionShortId && (
+                  <>
+                    <span className="font-mono bg-slate-100 px-2 py-0.5 rounded">
+                      exec: {executionShortId.slice(0, 18)}
+                    </span>
+                    {executionLogsUrl && (
+                      <a
+                        href={executionLogsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sky-600 hover:text-sky-700 hover:underline"
+                      >
+                        ↗ Cloud Logging
+                      </a>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Liveness warning — Job hasn't heartbeated for >90s */}
+            {syncIsStale && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-[13px] text-amber-900 mb-4 flex items-start gap-2">
+                <span className="text-lg leading-none">⚠️</span>
+                <div className="flex-1">
+                  <div className="font-bold">
+                    {isAR ? 'لم تستلم نبضات حياة من المزامنة منذ أكثر من ٩٠ ثانية.' : "Sync hasn't checked in for over 90s."}
+                  </div>
+                  <div className="text-[12px] text-amber-700 mt-0.5">
+                    {isAR
+                      ? 'قد تكون المهمة قد توقفت. جرّب "إنهاء فوري" ثم "بدء المزامنة" من جديد، أو افحص سجلات Cloud Run.'
+                      : 'The Job container may have died. Try Kill Job → Start Sync, or open Cloud Logging to inspect.'}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Error banner — Job exited or failed to launch */}
+            {syncStatus?.status === 'error' && syncStatus.errorMessage && (
+              <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-[13px] text-rose-900 mb-4 flex items-start gap-2">
+                <span className="text-lg leading-none">❌</span>
+                <div className="flex-1">
+                  <div className="font-bold">
+                    {isAR ? 'فشلت المزامنة.' : 'Sync failed.'}
+                  </div>
+                  <div className="text-[12px] text-rose-700 mt-0.5 font-mono break-all">
+                    {syncStatus.errorMessage}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!syncStatus && syncStarting && (
+              <div className="bg-sky-50 border border-sky-100 rounded-xl p-3 text-[13px] font-semibold text-sky-800 flex items-center gap-2">
+                <span className="animate-spin text-lg">⚙️</span>
+                <span>{isAR ? 'جاري بدء مهمة المزامنة في Cloud Run…' : 'Launching sync job on Cloud Run…'}</span>
+              </div>
+            )}
 
             {syncStatus && syncStatus.status !== 'idle' && (
               <div className="space-y-4">
@@ -765,7 +928,21 @@ export default function BooksScreen() {
         {/* Empty State */}
         {filtered.length === 0 && (
           <Card className="p-8 text-center text-slate-500 mt-6">
-            {isAR ? 'لا يوجد كتب حالياً في هذا القسم. اضغط على بدء المزامنة في الأعلى أو قم برفع كتابك الخاص.' : 'No textbooks currently indexed. Start sync above or upload your own to begin!'}
+            {booksLoading
+              ? isAR
+                ? 'جاري تحميل الكتب من قاعدة البيانات…'
+                : 'Loading books from Firestore…'
+              : activeTab === 'added'
+              ? isAR
+                ? 'لم ترفع أي كتاب بعد. استخدم البطاقة أعلاه لرفع PDF خاص بك.'
+                : 'No custom books yet. Use the card above to upload a PDF.'
+              : dbBooks.length === 0
+              ? isAR
+                ? 'مستودع الكتب فارغ. افتح لوحة المزامنة ثم اضغط "بدء المزامنة" لتنزيل كتب الوزارة.'
+                : 'The book repository is empty. Open the Sync Console and press "Start Sync" to download MOE textbooks.'
+              : isAR
+              ? 'لا يوجد كتب تطابق هذا الفلتر.'
+              : 'No books match this filter.'}
           </Card>
         )}
 

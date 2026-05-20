@@ -35,6 +35,7 @@ from pydantic import BaseModel  # noqa: E402
 
 from google.cloud import firestore  # noqa: E402
 from google.cloud import storage  # noqa: E402
+from google.cloud import run_v2  # noqa: E402
 from google import genai  # noqa: E402
 import math  # noqa: E402
 from ingestion_agent.agent import run_sync_pipeline  # noqa: E402
@@ -378,25 +379,81 @@ async def onboarding(
 FIRESTORE_PROJECT = os.getenv("FIRESTORE_PROJECT", "khsosy")
 FIRESTORE_DATABASE = os.getenv("FIRESTORE_DATABASE", "(default)")
 GCS_BUCKET = os.getenv("GCS_BUCKET", "khsosy.firebasestorage.app")
+SYNC_JOB_NAME = os.getenv("SYNC_JOB_NAME", "fivesosybot-sync")
+SYNC_JOB_REGION = os.getenv("SYNC_JOB_REGION", "us-east4")
+SYNC_JOB_PROJECT = os.getenv("SYNC_JOB_PROJECT", FIRESTORE_PROJECT)
 
 db = firestore.Client(project=FIRESTORE_PROJECT, database=FIRESTORE_DATABASE)
 storage_client = storage.Client(project=FIRESTORE_PROJECT)
 
-_sync_lock = asyncio.Lock()
-_sync_running = False
 
-async def run_sync_wrapper():
-    global _sync_running
-    if _sync_running:
-        return
-    async with _sync_lock:
-        _sync_running = True
-        try:
-            await run_sync_pipeline(db, storage_client, GCS_BUCKET)
-        except Exception as e:
-            print(f"Error in sync background execution: {e}")
-        finally:
-            _sync_running = False
+def _sync_job_resource() -> str:
+    return f"projects/{SYNC_JOB_PROJECT}/locations/{SYNC_JOB_REGION}/jobs/{SYNC_JOB_NAME}"
+
+
+def _starting_log() -> list[dict]:
+    return [
+        {
+            "timestamp": _now_iso(),
+            "text": "Sync requested by user. Launching Cloud Run Job…",
+            "status": "info",
+            "agent": "Orchestrator",
+        }
+    ]
+
+
+def _seed_status_running() -> None:
+    """Eagerly seed `ingestion/status` so the UI has something to render
+    before the Cloud Run Job container even starts. Preserves history
+    (booksList, totalPagesProcessed) from previous runs."""
+    status_ref = db.collection("ingestion").document("status")
+    existing = status_ref.get().to_dict() or {}
+    status_ref.set(
+        {
+            "status": "running",
+            "pausedByRequest": False,
+            "logs": _starting_log(),
+            "totalBooks": existing.get("totalBooks", 0),
+            "downloadedBooks": existing.get("downloadedBooks", 0),
+            "parsedBooks": existing.get("parsedBooks", 0),
+            "totalPagesProcessed": existing.get("totalPagesProcessed", 0),
+            "progressMessage": "Starting sync…",
+            "percentage": existing.get("percentage", 0.0),
+            "activeBookId": "",
+            "activeBookTitle": "",
+            "booksList": existing.get("booksList", {}),
+            "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
+            "executionName": "",
+            "errorMessage": "",
+        },
+        merge=True,
+    )
+
+
+def _launch_sync_job() -> str:
+    """Trigger a fresh Cloud Run Job execution. Returns the full execution
+    resource name (projects/.../executions/<id>)."""
+    client = run_v2.JobsClient()
+    operation = client.run_job(name=_sync_job_resource())
+    # The Job execution is created immediately; we don't wait for the
+    # container to finish — that's the whole point.
+    execution = operation.metadata.execution if operation.metadata else None
+    if execution and getattr(execution, "name", None):
+        return execution.name
+    # Fall back to peeking at the operation name if metadata isn't populated.
+    return getattr(operation, "name", "") or ""
+
+
+def _cancel_sync_execution(execution_name: str) -> bool:
+    if not execution_name:
+        return False
+    try:
+        client = run_v2.ExecutionsClient()
+        client.cancel_execution(name=execution_name)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        print(f"Failed to cancel execution {execution_name}: {exc}")
+        return False
 
 
 class IngestionSyncRequest(BaseModel):
@@ -407,73 +464,156 @@ class IngestionSyncRequest(BaseModel):
 @app.post("/v1/ingestion/sync")
 async def ingestion_sync(
     req: IngestionSyncRequest,
-    background_tasks: BackgroundTasks,
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
 ) -> dict:
     _require_api_key(x_api_key)
-    
+
     status_ref = db.collection("ingestion").document("status")
-    
+
     if req.command == "start":
-        doc = status_ref.get()
-        doc_data = doc.to_dict() or {}
-        
-        # If already running, just return ok
-        if doc_data.get("status") == "running" and _sync_running:
-            return {"ok": True, "status": "running", "message": "Sync is already running."}
-            
-        # Reset pause flag
-        status_ref.update({"pausedByRequest": False})
-        
-        # Trigger background sync
-        background_tasks.add_task(run_sync_wrapper)
-        return {"ok": True, "status": "running", "message": "Sync started in background."}
-        
+        existing = status_ref.get().to_dict() or {}
+        if existing.get("status") == "running":
+            return {
+                "ok": True,
+                "status": "running",
+                "message": "Sync is already running.",
+                "executionName": existing.get("executionName", ""),
+            }
+
+        # Seed the status doc *before* launching, so the UI renders immediately.
+        _seed_status_running()
+
+        try:
+            execution_name = await asyncio.get_running_loop().run_in_executor(
+                None, _launch_sync_job
+            )
+        except Exception as exc:  # noqa: BLE001
+            status_ref.update(
+                {
+                    "status": "error",
+                    "errorMessage": f"Failed to launch sync job: {exc}",
+                    "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
+                }
+            )
+            raise HTTPException(status_code=500, detail=f"Failed to launch sync job: {exc}")
+
+        status_ref.update(
+            {
+                "executionName": execution_name,
+                "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
+            }
+        )
+        return {
+            "ok": True,
+            "status": "running",
+            "executionName": execution_name,
+            "message": "Sync job execution launched.",
+        }
+
     elif req.command == "pause":
-        status_ref.update({
-            "pausedByRequest": True,
-            "status": "paused"
-        })
+        status_ref.update(
+            {
+                "pausedByRequest": True,
+                "status": "paused",
+                "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
+            }
+        )
         return {"ok": True, "status": "paused", "message": "Pause request received."}
-        
+
     elif req.command == "resume":
-        status_ref.update({
-            "pausedByRequest": False,
-            "status": "running"
-        })
-        background_tasks.add_task(run_sync_wrapper)
-        return {"ok": True, "status": "running", "message": "Sync resumed."}
-        
+        # Clear pause flag and launch a fresh job execution. The pipeline is
+        # idempotent — books already in `books` will be skipped.
+        status_ref.update({"pausedByRequest": False})
+        _seed_status_running()
+        try:
+            execution_name = await asyncio.get_running_loop().run_in_executor(
+                None, _launch_sync_job
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail=f"Failed to launch sync job: {exc}")
+        status_ref.update({"executionName": execution_name})
+        return {
+            "ok": True,
+            "status": "running",
+            "executionName": execution_name,
+            "message": "Sync resumed.",
+        }
+
+    elif req.command == "kill":
+        existing = status_ref.get().to_dict() or {}
+        exec_name = existing.get("executionName", "")
+        cancelled = await asyncio.get_running_loop().run_in_executor(
+            None, _cancel_sync_execution, exec_name
+        )
+        # Also flip the pause flag so the loop exits if the cancel is slow.
+        status_ref.update(
+            {
+                "pausedByRequest": True,
+                "status": "idle" if cancelled else existing.get("status", "idle"),
+                "progressMessage": "Sync killed by user." if cancelled else existing.get("progressMessage", ""),
+                "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
+            }
+        )
+        return {
+            "ok": True,
+            "status": "idle" if cancelled else "unknown",
+            "cancelled": cancelled,
+            "message": (
+                f"Execution cancelled: {exec_name}" if cancelled
+                else "No active execution to cancel."
+            ),
+        }
+
     elif req.command == "reset":
-        # Request halt
-        status_ref.update({"pausedByRequest": True})
-        await asyncio.sleep(0.5) # Let it yield if running
-        
+        existing = status_ref.get().to_dict() or {}
+        exec_name = existing.get("executionName", "")
+        await asyncio.get_running_loop().run_in_executor(
+            None, _cancel_sync_execution, exec_name
+        )
+
         # Reset status document
-        status_ref.set({
-            "status": "idle",
-            "pausedByRequest": False,
-            "logs": [],
-            "totalBooks": 0,
-            "downloadedBooks": 0,
-            "parsedBooks": 0,
-            "percentage": 0.0,
-            "activeBookId": "",
-            "activeBookTitle": "",
-            "booksList": {}
-        })
-        
-        # Clear books collection
+        status_ref.set(
+            {
+                "status": "idle",
+                "pausedByRequest": False,
+                "logs": [],
+                "totalBooks": 0,
+                "downloadedBooks": 0,
+                "parsedBooks": 0,
+                "totalPagesProcessed": 0,
+                "percentage": 0.0,
+                "activeBookId": "",
+                "activeBookTitle": "",
+                "progressMessage": "",
+                "booksList": {},
+                "executionName": "",
+                "errorMessage": "",
+                "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
+            }
+        )
+
+        # Clear books collection (batched, only catalog-sync books — admin SDK
+        # has free reign; the client deletes its own custom books via
+        # /api/books/delete on the web side).
         books_coll = db.collection("books")
-        # We can delete in batches
-        docs = books_coll.limit(100).stream()
+        loop = asyncio.get_running_loop()
         deleted = 0
-        for d in docs:
-            d.reference.delete()
-            deleted += 1
-            
-        return {"ok": True, "status": "idle", "message": f"Sync status reset. Deleted {deleted} book documents."}
-        
+        while True:
+            docs = await loop.run_in_executor(None, lambda: list(books_coll.limit(100).stream()))
+            if not docs:
+                break
+            for d in docs:
+                await loop.run_in_executor(None, d.reference.delete)
+                deleted += 1
+            if len(docs) < 100:
+                break
+
+        return {
+            "ok": True,
+            "status": "idle",
+            "message": f"Sync reset. Cancelled execution and deleted {deleted} book documents.",
+        }
+
     else:
         raise HTTPException(status_code=400, detail=f"Unknown sync command: {req.command}")
 
@@ -589,9 +729,15 @@ async def parse_book_endpoint(
     x_api_key: str | None = Header(default=None, alias="X-API-Key")
 ) -> dict:
     _require_api_key(x_api_key)
-    doc = db.collection("books").document(req.bookId).get()
-    if doc.exists:
-        return {"ok": True, "message": "Book already processed."}
+    book_ref = db.collection("books").document(req.bookId)
+    doc = book_ref.get()
+    doc_data = doc.to_dict() or {}
+    # Only short-circuit if the book is actually fully indexed. The frontend
+    # creates the doc with status='processing' before calling us, so checking
+    # doc.exists alone would skip every parse.
+    if doc_data.get("status") == "indexed" and doc_data.get("pages", 0) > 0:
+        return {"ok": True, "message": "Book already indexed."}
+
     async def run_parse():
         try:
             print(f"Background parsing started for added book: {req.title} (ID: {req.bookId})")
@@ -612,10 +758,16 @@ async def parse_book_endpoint(
                 "chapters": 8
             }
             await index_book_to_firestore(req.bookId, ocr_results_json, json.dumps(book_metadata))
+            book_ref.update({"status": "indexed"})
             print(f"Background parsing completed for added book: {req.title}")
             await load_pages_cache()
         except Exception as e:
             print(f"Error background parsing added book {req.title}: {e}")
+            try:
+                book_ref.update({"status": "error", "errorMessage": str(e)[:500]})
+            except Exception as inner:
+                print(f"Failed to mark book as error: {inner}")
+
     background_tasks.add_task(run_parse)
     return {"ok": True, "message": "Parsing started in the background."}
 

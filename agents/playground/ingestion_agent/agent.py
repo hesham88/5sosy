@@ -189,8 +189,10 @@ async def run_sync_pipeline(
         "percentage": 0.0,
         "activeBookId": "",
         "activeBookTitle": "",
-        "booksList": status_data.get("booksList", {})
-    })
+        "booksList": status_data.get("booksList", {}),
+        "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
+        "executionName": status_data.get("executionName", ""),
+    }, merge=True)
     
     try:
         catalog = await fetch_catalog()
@@ -248,24 +250,25 @@ async def run_sync_pipeline(
                 append_log(logs, "Sync pipeline paused by user request.", "warn")
                 status_ref.update({
                     "status": "paused",
-                    "logs": logs
+                    "logs": logs,
+                    "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
                 })
                 return
-                
+
             gov_url = book.get("link")
             if not gov_url:
                 continue
             b_id = get_book_id(gov_url, book.get("subject", "book"))
-            
+
             if books_list.get(b_id, {}).get("status") == "completed":
                 continue
-                
+
             b_title = book.get("subject", "Unknown Subject")
             append_log(logs, f"Processing book {idx+1}/{total_books}: {b_title} ({book.get('grade')})", "info")
-            
+
             books_list[b_id]["status"] = "downloading"
             books_list[b_id]["progress"] = 20
-            
+
             # Progress message for download
             progress_msg = f"I am Downloading on {b_title} || {completed_count} out of {total_books}"
             status_ref.update({
@@ -273,7 +276,8 @@ async def run_sync_pipeline(
                 "activeBookTitle": b_title,
                 "progressMessage": progress_msg,
                 "booksList": books_list,
-                "logs": logs
+                "logs": logs,
+                "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
             })
             
             # Step 1: Download
@@ -441,12 +445,14 @@ async def run_sync_pipeline(
             "activeBookId": "",
             "activeBookTitle": "",
             "progressMessage": "",
-            "logs": logs
+            "logs": logs,
+            "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
         })
-        
+
     except Exception as general_err:
         append_log(logs, f"Sync pipeline failed with error: {general_err}", "error")
         status_ref.update({
             "status": "error",
-            "logs": logs
+            "logs": logs,
+            "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
         })

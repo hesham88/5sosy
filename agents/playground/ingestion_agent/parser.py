@@ -234,6 +234,7 @@ async def index_book_to_firestore(book_id: str, ocr_results_json: str, book_meta
         "pages": len(ocr_results),
         "pagesList": ocr_results,
         "text": full_rich_text,
+        "status": "indexed",
         "createdAt": firestore.SERVER_TIMESTAMP,
         "updatedAt": firestore.SERVER_TIMESTAMP
     }

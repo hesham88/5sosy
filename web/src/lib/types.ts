@@ -153,5 +153,8 @@ export type IngestionStatus = {
   activeBookId?: string;
   activeBookTitle?: string;
   booksList?: Record<string, IngestedBookDetail>;
+  executionName?: string;
+  lastHeartbeatAt?: { toMillis(): number } | null;
+  errorMessage?: string;
 };
 

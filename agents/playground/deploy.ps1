@@ -34,6 +34,13 @@ gcloud projects add-iam-policy-binding $Project `
   --condition=None `
   --quiet | Out-Null
 
+# Service needs to launch + cancel Cloud Run Job executions for the sync console.
+gcloud projects add-iam-policy-binding $Project `
+  --member "serviceAccount:$buildSa" `
+  --role "roles/run.developer" `
+  --condition=None `
+  --quiet | Out-Null
+
 # Pre-create the Artifact Registry repo so the deploy doesn't prompt interactively.
 $repoExists = gcloud artifacts repositories describe cloud-run-source-deploy `
   --project $Project --location $Region --format "value(name)" 2>$null
@@ -47,10 +54,14 @@ if (-not $repoExists) {
 
 $webOrigins = "http://localhost:3000,https://khsosyapphosting--khsosy.us-east4.hosted.app"
 # `^@^` overrides gcloud's default `,` delimiter so commas inside ALLOWED_ORIGINS don't break parsing.
-$envVars = "^@^GEMINI_MODEL=gemini-3.1-flash-lite@GOOGLE_GENAI_USE_VERTEXAI=FALSE@ALLOWED_ORIGINS=$webOrigins"
+$envVars = "^@^GEMINI_MODEL=gemini-3.1-flash-lite@GOOGLE_GENAI_USE_VERTEXAI=FALSE@ALLOWED_ORIGINS=$webOrigins@SYNC_JOB_NAME=fivesosybot-sync@SYNC_JOB_REGION=$Region@SYNC_JOB_PROJECT=$Project@GCS_BUCKET=khsosy.firebasestorage.app"
 
 Write-Host "Deploying $Service to $Region in $Project (this builds the container in Cloud Build)..." -ForegroundColor Cyan
 
+# --no-cpu-throttling: keeps CPU always allocated so BackgroundTasks (custom PDF
+# parse) survive past the HTTP response. --timeout 3600 is the Cloud Run max for
+# request-driven services; combined with always-allocated CPU it covers single
+# large PDFs. The batch MOE sync is no longer here — see deploy-job.ps1.
 gcloud run deploy $Service `
   --source . `
   --project $Project `
@@ -59,11 +70,12 @@ gcloud run deploy $Service `
   --allow-unauthenticated `
   --quiet `
   --port 8080 `
-  --memory 512Mi `
+  --memory 1Gi `
   --cpu 1 `
+  --no-cpu-throttling `
   --max-instances 3 `
   --concurrency 10 `
-  --timeout 120 `
+  --timeout 3600 `
   --set-env-vars $envVars `
   --set-secrets "GOOGLE_API_KEY=gemini-api-key:latest,AGENTS_API_KEY=fivesosybot-api-key:latest"
 
