@@ -504,13 +504,27 @@ async def ingestion_sync(
 
     if req.command == "start":
         existing = status_ref.get().to_dict() or {}
+        # Stale heartbeat → previous execution died without writing a terminal
+        # state. Treat it as restartable so the user isn't stuck with a phantom
+        # "running" status forever.
         if existing.get("status") == "running":
-            return {
-                "ok": True,
-                "status": "running",
-                "message": "Sync is already running.",
-                "executionName": existing.get("executionName", ""),
-            }
+            hb = existing.get("lastHeartbeatAt")
+            hb_age_sec = float("inf")
+            if hb is not None and hasattr(hb, "timestamp"):
+                try:
+                    hb_age_sec = time.time() - hb.timestamp()
+                except Exception:
+                    hb_age_sec = float("inf")
+            if hb_age_sec < 180:  # less than 3 minutes since last heartbeat
+                return {
+                    "ok": True,
+                    "status": "running",
+                    "message": "Sync is already running.",
+                    "executionName": existing.get("executionName", ""),
+                }
+            print(
+                f"Status was 'running' but heartbeat is stale ({hb_age_sec:.0f}s old) — restarting."
+            )
 
         # Seed the status doc *before* launching, so the UI renders immediately.
         _seed_status_running()
