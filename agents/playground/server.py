@@ -1,10 +1,12 @@
 """FastAPI server for 5sosybot.
 
 Exposes:
-  GET  /healthz             — liveness probe.
-  POST /v1/chat             — SSE stream. Each step emits `event: step`; the
-                              terminal event is `event: final` carrying the full
-                              wrapped response including the trace[].
+  GET  /health              — liveness probe (NOT /healthz — Knative reserves that).
+  POST /v1/chat             — SSE stream for the orchestrator chatbot. Each step emits
+                              `event: step`; terminal event is `event: final`.
+  POST /v1/onboarding       — SSE stream for the onboarding interview. Terminal event is
+                              `event: turn` carrying the parsed `next_step` JSON the
+                              onboarding agent emitted (kind: 'question' | 'complete').
 
 Auth: requests must include X-API-Key matching AGENTS_API_KEY env. If the env
 var is unset, auth is disabled (for local dev only — Cloud Run sets it).
@@ -23,19 +25,29 @@ from dotenv import load_dotenv
 
 # Load .env BEFORE importing the agents (they read GEMINI_MODEL at import time).
 load_dotenv()
+if "GEMINI_API_KEY" not in os.environ and "GOOGLE_API_KEY" in os.environ:
+    os.environ["GEMINI_API_KEY"] = os.environ["GOOGLE_API_KEY"]
 
-from fastapi import FastAPI, Header, HTTPException  # noqa: E402
+from fastapi import FastAPI, Header, HTTPException, BackgroundTasks  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import StreamingResponse  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
+from google.cloud import firestore  # noqa: E402
+from google.cloud import storage  # noqa: E402
+from google import genai  # noqa: E402
+import math  # noqa: E402
+from ingestion_agent.agent import run_sync_pipeline  # noqa: E402
+from ingestion_agent.parser import split_pdf_to_pages, ocr_pages_with_gemini, index_book_to_firestore  # noqa: E402
 from google.adk.runners import Runner  # noqa: E402
 from google.adk.sessions import InMemorySessionService  # noqa: E402
 from google.genai import types  # noqa: E402
 
+from onboarding_agent.agent import root_agent as onboarding_agent  # noqa: E402
 from orchestrator_agent.agent import root_agent as orchestrator_agent  # noqa: E402
 
 APP_NAME = "fivesosybot"
+ONBOARDING_APP_NAME = "fivesosybot-onboarding"
 API_KEY = os.getenv("AGENTS_API_KEY")
 ALLOWED_ORIGINS = [
     o.strip()
@@ -60,6 +72,11 @@ _runner = Runner(
     app_name=APP_NAME,
     session_service=_session_service,
 )
+_onboarding_runner = Runner(
+    agent=onboarding_agent,
+    app_name=ONBOARDING_APP_NAME,
+    session_service=_session_service,
+)
 
 
 class ChatRequest(BaseModel):
@@ -67,6 +84,14 @@ class ChatRequest(BaseModel):
     username: str = "guest"
     locale: str = "en"
     session_id: str | None = None
+
+
+class OnboardingRequest(BaseModel):
+    message: str = ""
+    username: str = "guest"
+    locale: str = "en"
+    session_id: str | None = None
+    collected_so_far: dict = {}
 
 
 def _require_api_key(x_api_key: str | None) -> None:
@@ -139,6 +164,32 @@ def _extract_step(event, index: int, prev_ms: int) -> dict | None:
                 "final": bool(event.is_final_response()),
                 "duration_ms": duration_ms,
             }
+    return None
+
+
+def _extract_final_json(text: str) -> dict | None:
+    """Parse the agent's final text as JSON. Tolerates fences and leading prose."""
+    if not text:
+        return None
+    candidate = text.strip()
+    # Strip ```json ... ``` fences if the model added them despite instructions.
+    if candidate.startswith("```"):
+        candidate = candidate.strip("`")
+        if candidate.lower().startswith("json"):
+            candidate = candidate[4:]
+        candidate = candidate.strip()
+    try:
+        return json.loads(candidate)
+    except Exception:
+        pass
+    # Fallback: find the last balanced {...} block.
+    last_open = candidate.rfind("{")
+    last_close = candidate.rfind("}")
+    if last_open != -1 and last_close > last_open:
+        try:
+            return json.loads(candidate[last_open : last_close + 1])
+        except Exception:
+            return None
     return None
 
 
@@ -238,6 +289,335 @@ async def chat(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.post("/v1/onboarding")
+async def onboarding(
+    req: OnboardingRequest,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> StreamingResponse:
+    _require_api_key(x_api_key)
+    session_id = req.session_id or uuid.uuid4().hex
+
+    async def stream() -> AsyncGenerator[bytes, None]:
+        started_at = _now_iso()
+        started_ms = int(time.time() * 1000)
+        prev_ms = started_ms
+        trace: list[dict] = []
+        final_response = ""
+
+        try:
+            existing = await _session_service.get_session(
+                app_name=ONBOARDING_APP_NAME, user_id=req.username, session_id=session_id
+            )
+            if existing is None:
+                await _session_service.create_session(
+                    app_name=ONBOARDING_APP_NAME, user_id=req.username, session_id=session_id
+                )
+            collected_blob = json.dumps(req.collected_so_far or {}, ensure_ascii=False)
+            prelude = (
+                f"[metadata] username={req.username} locale={req.locale}\n"
+                f"[collected_so_far] {collected_blob}\n\n"
+            )
+            user_text = req.message or "(begin)"
+            message = types.Content(role="user", parts=[types.Part(text=prelude + user_text)])
+
+            yield _sse(
+                "start",
+                {"session_id": session_id, "started_at": started_at},
+            )
+
+            index = 0
+            async for event in _onboarding_runner.run_async(
+                user_id=req.username, session_id=session_id, new_message=message
+            ):
+                step = _extract_step(event, index, prev_ms)
+                if step is None:
+                    continue
+                prev_ms = int(time.time() * 1000)
+                trace.append(step)
+                yield _sse("step", step)
+                index += 1
+                if step["step_type"] == "text" and step.get("final"):
+                    final_response = step.get("output", "") or ""
+                await asyncio.sleep(0)
+
+            next_step = _extract_final_json(final_response)
+            finished_at = _now_iso()
+            duration_ms = int(time.time() * 1000) - started_ms
+
+            yield _sse(
+                "turn",
+                {
+                    "session_id": session_id,
+                    "username": req.username,
+                    "locale": req.locale,
+                    "next_step": next_step,
+                    "raw_final": final_response,
+                    "trace": trace,
+                    "started_at": started_at,
+                    "finished_at": finished_at,
+                    "duration_ms": duration_ms,
+                },
+            )
+        except Exception as exc:
+            yield _sse(
+                "error",
+                {"message": f"{type(exc).__name__}: {exc}", "session_id": session_id},
+            )
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
+# Initialize Firestore and Storage
+FIRESTORE_PROJECT = os.getenv("FIRESTORE_PROJECT", "khsosy")
+FIRESTORE_DATABASE = os.getenv("FIRESTORE_DATABASE", "(default)")
+GCS_BUCKET = os.getenv("GCS_BUCKET", "khsosy.firebasestorage.app")
+
+db = firestore.Client(project=FIRESTORE_PROJECT, database=FIRESTORE_DATABASE)
+storage_client = storage.Client(project=FIRESTORE_PROJECT)
+
+_sync_lock = asyncio.Lock()
+_sync_running = False
+
+async def run_sync_wrapper():
+    global _sync_running
+    if _sync_running:
+        return
+    async with _sync_lock:
+        _sync_running = True
+        try:
+            await run_sync_pipeline(db, storage_client, GCS_BUCKET)
+        except Exception as e:
+            print(f"Error in sync background execution: {e}")
+        finally:
+            _sync_running = False
+
+
+class IngestionSyncRequest(BaseModel):
+    command: str
+    username: str = "guest"
+
+
+@app.post("/v1/ingestion/sync")
+async def ingestion_sync(
+    req: IngestionSyncRequest,
+    background_tasks: BackgroundTasks,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> dict:
+    _require_api_key(x_api_key)
+    
+    status_ref = db.collection("ingestion").document("status")
+    
+    if req.command == "start":
+        doc = status_ref.get()
+        doc_data = doc.to_dict() or {}
+        
+        # If already running, just return ok
+        if doc_data.get("status") == "running" and _sync_running:
+            return {"ok": True, "status": "running", "message": "Sync is already running."}
+            
+        # Reset pause flag
+        status_ref.update({"pausedByRequest": False})
+        
+        # Trigger background sync
+        background_tasks.add_task(run_sync_wrapper)
+        return {"ok": True, "status": "running", "message": "Sync started in background."}
+        
+    elif req.command == "pause":
+        status_ref.update({
+            "pausedByRequest": True,
+            "status": "paused"
+        })
+        return {"ok": True, "status": "paused", "message": "Pause request received."}
+        
+    elif req.command == "resume":
+        status_ref.update({
+            "pausedByRequest": False,
+            "status": "running"
+        })
+        background_tasks.add_task(run_sync_wrapper)
+        return {"ok": True, "status": "running", "message": "Sync resumed."}
+        
+    elif req.command == "reset":
+        # Request halt
+        status_ref.update({"pausedByRequest": True})
+        await asyncio.sleep(0.5) # Let it yield if running
+        
+        # Reset status document
+        status_ref.set({
+            "status": "idle",
+            "pausedByRequest": False,
+            "logs": [],
+            "totalBooks": 0,
+            "downloadedBooks": 0,
+            "parsedBooks": 0,
+            "percentage": 0.0,
+            "activeBookId": "",
+            "activeBookTitle": "",
+            "booksList": {}
+        })
+        
+        # Clear books collection
+        books_coll = db.collection("books")
+        # We can delete in batches
+        docs = books_coll.limit(100).stream()
+        deleted = 0
+        for d in docs:
+            d.reference.delete()
+            deleted += 1
+            
+        return {"ok": True, "status": "idle", "message": f"Sync status reset. Deleted {deleted} book documents."}
+        
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown sync command: {req.command}")
+
+
+# In-memory cache for page embeddings
+_pages_cache: list[dict] = []
+_cache_loaded: bool = False
+_cache_lock = asyncio.Lock()
+
+async def load_pages_cache():
+    global _pages_cache, _cache_loaded
+    async with _cache_lock:
+        print("Loading pages cache from Firestore collection group 'pages'...")
+        try:
+            pages_ref = db.collection_group("pages")
+            docs = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: list(pages_ref.stream())
+            )
+            new_cache = []
+            for doc in docs:
+                data = doc.to_dict()
+                if "embedding" in data and data["embedding"]:
+                    new_cache.append({
+                        "bookId": data.get("bookId"),
+                        "bookTitle": data.get("bookTitle", "Unknown Book"),
+                        "pageNumber": data.get("pageNumber"),
+                        "text": data.get("text", ""),
+                        "embedding": data["embedding"],
+                        "grade": data.get("grade", ""),
+                        "subject": data.get("subject", ""),
+                        "language": data.get("language", "ar"),
+                        "year": data.get("year", 2026)
+                    })
+            _pages_cache = new_cache
+            _cache_loaded = True
+            print(f"Pages cache loaded. Total pages: {len(_pages_cache)}")
+        except Exception as e:
+            print(f"Error loading pages cache: {e}")
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(load_pages_cache())
+
+class SearchRequest(BaseModel):
+    query: str
+    limit: int = 10
+
+def dot_product(v1, v2):
+    return sum(x * y for x, y in zip(v1, v2))
+
+def magnitude(v):
+    return math.sqrt(sum(x * x for x in v))
+
+def cosine_similarity(v1, v2):
+    mag1 = magnitude(v1)
+    mag2 = magnitude(v2)
+    if mag1 == 0 or mag2 == 0:
+        return 0.0
+    return dot_product(v1, v2) / (mag1 * mag2)
+
+@app.post("/v1/books/search")
+async def books_search(req: SearchRequest, x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> dict:
+    _require_api_key(x_api_key)
+    global _pages_cache, _cache_loaded
+    if not _cache_loaded:
+        await load_pages_cache()
+    if not req.query.strip():
+        return {"results": []}
+    try:
+        client = genai.Client()
+        response = await client.aio.models.embed_content(
+            model="models/gemini-embedding-2",
+            contents=req.query
+        )
+        query_emb = response.embeddings[0].values
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate query embedding: {e}")
+    results = []
+    for item in _pages_cache:
+        score = cosine_similarity(query_emb, item["embedding"])
+        if score > 0.15:
+            results.append({
+                "bookId": item["bookId"],
+                "bookTitle": item["bookTitle"],
+                "pageNumber": item["pageNumber"],
+                "text": item["text"][:300] + "..." if len(item["text"]) > 300 else item["text"],
+                "grade": item["grade"],
+                "subject": item["subject"],
+                "language": item["language"],
+                "year": item["year"],
+                "score": round(score, 4)
+            })
+    results.sort(key=lambda x: x["score"], reverse=True)
+    results = results[:req.limit]
+    return {"results": results}
+
+class ParseBookRequest(BaseModel):
+    bookId: str
+    title: str
+    gcsUri: str
+    stage: str = "Other"
+    grade: str = "Other"
+    term: str = "Other"
+    subject: str = "Other"
+    type: str = "Added Book"
+    language: str = "ar"
+    year: int = 2026
+
+@app.post("/v1/ingestion/parse-book")
+async def parse_book_endpoint(
+    req: ParseBookRequest,
+    background_tasks: BackgroundTasks,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key")
+) -> dict:
+    _require_api_key(x_api_key)
+    doc = db.collection("books").document(req.bookId).get()
+    if doc.exists:
+        return {"ok": True, "message": "Book already processed."}
+    async def run_parse():
+        try:
+            print(f"Background parsing started for added book: {req.title} (ID: {req.bookId})")
+            pages_json = await split_pdf_to_pages(req.gcsUri, req.bookId)
+            ocr_results_json = await ocr_pages_with_gemini(pages_json)
+            book_metadata = {
+                "id": req.bookId,
+                "title": req.title,
+                "stage": req.stage,
+                "grade": req.grade,
+                "term": req.term,
+                "subject": req.subject,
+                "type": req.type,
+                "language": req.language,
+                "year": req.year,
+                "govUrl": "",
+                "gcsUri": req.gcsUri,
+                "chapters": 8
+            }
+            await index_book_to_firestore(req.bookId, ocr_results_json, json.dumps(book_metadata))
+            print(f"Background parsing completed for added book: {req.title}")
+            await load_pages_cache()
+        except Exception as e:
+            print(f"Error background parsing added book {req.title}: {e}")
+    background_tasks.add_task(run_parse)
+    return {"ok": True, "message": "Parsing started in the background."}
 
 
 if __name__ == "__main__":

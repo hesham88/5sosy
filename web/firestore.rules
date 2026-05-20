@@ -10,9 +10,11 @@ service cloud.firestore {
     // Curriculum / catalogue / content — public read, no writes from client
     match /subjects/{subjectId}        { allow read: if true; allow write: if false; }
     match /textbooks/{textbookId}      { allow read: if true; allow write: if false; }
+    match /books/{bookId}              { allow read: if true; allow write: if false; }
     match /chapters/{chapterId}        { allow read: if true; allow write: if false; }
     match /concepts/{conceptId}        { allow read: if true; allow write: if false; }
     match /quizQuestions/{qid}         { allow read: if true; allow write: if false; }
+    match /ingestion/{docId}           { allow read, write: if true; }
 
     // User profile docs
     match /users/{uid} {
@@ -27,6 +29,7 @@ service cloud.firestore {
       match /quizAttempts/{aid}    { allow read, write: if isOwner(uid); }
       match /mastery/{conceptId}   { allow read, write: if isOwner(uid); }
       match /activity/{eventId}    { allow read, write: if isOwner(uid); }
+      match /customBooks/{bookId}  { allow read, write: if isOwner(uid); }
     }
 
     // Catch-all deny

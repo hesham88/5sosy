@@ -20,10 +20,30 @@ export default function SignInClient() {
     return null;
   }
 
+  const friendly = (e: unknown): string => {
+    const code = (e as { code?: string } | null)?.code ?? '';
+    const raw = (e as Error | null)?.message ?? 'unknown';
+    if (code === 'auth/admin-restricted-operation' || code === 'auth/operation-not-allowed') {
+      return isAR
+        ? 'تسجيل دخول الضيف مش مفعّل في Firebase. روح Firebase Console → Authentication → Sign-in method وفعّل Anonymous.'
+        : 'Anonymous sign-in is not enabled. Open Firebase Console → Authentication → Sign-in method and enable the Anonymous provider.';
+    }
+    if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+      return isAR ? 'اتقفلت نافذة جوجل قبل ما تكمل.' : 'Google sign-in window was closed before finishing.';
+    }
+    if (code === 'auth/popup-blocked') {
+      return isAR ? 'المتصفح حجب النافذة المنبثقة. اسمح بها ثم حاول تاني.' : 'Your browser blocked the popup. Allow popups and try again.';
+    }
+    if (code === 'auth/network-request-failed') {
+      return isAR ? 'اتصال الإنترنت فيه مشكلة. حاول تاني.' : 'Network error — please try again.';
+    }
+    return raw;
+  };
+
   const wrap = (name: string, fn: () => Promise<void>) => async () => {
     setBusy(name); setErr(null);
     try { await fn(); router.replace(search.get('next') ?? `/${locale}/home`); }
-    catch (e) { setErr((e as Error).message); }
+    catch (e) { setErr(friendly(e)); }
     finally { setBusy(null); }
   };
 

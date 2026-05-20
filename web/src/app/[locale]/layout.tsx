@@ -4,6 +4,7 @@ import { Cairo, Tajawal, Inter, JetBrains_Mono } from 'next/font/google';
 import { LOCALES, dirFor, isLocale, type Locale } from '@/i18n/config';
 import { getDictionary } from '@/i18n/get-dictionary';
 import { Providers } from '@/components/shared/Providers';
+import { AuthGate } from '@/components/shared/AuthGate';
 import { FiveSosyBot } from '@/components/fivesosybot/FiveSosyBot';
 
 const cairo = Cairo({ subsets: ['arabic', 'latin'], variable: '--font-cairo', weight: ['400','500','600','700','800'] });
@@ -39,8 +40,10 @@ export default async function LocaleLayout({
     >
       <body>
         <Providers locale={locale as Locale} dict={dict}>
-          {children}
-          <FiveSosyBot />
+          <AuthGate>
+            {children}
+            <FiveSosyBot />
+          </AuthGate>
         </Providers>
       </body>
     </html>

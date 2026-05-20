@@ -6,6 +6,10 @@ import { useEffect, useState } from 'react';
 import { useApp } from './Providers';
 import { Logo } from './atoms';
 import { useAuth } from '@/lib/firebase/auth-context';
+import { useProfile } from '@/lib/firebase/use-profile';
+import { dicebearUrl } from '@/lib/avatar';
+import { YEAR_OF_EDUCATION_OPTIONS } from '@/constants/onboarding';
+import type { AvatarStyle } from '@/lib/types';
 
 const NAV_ITEMS = [
   { id: 'home',     icon: '🏠' },
@@ -57,28 +61,70 @@ function NavList({ activeKey, onPick }: { activeKey: string; onPick?: () => void
   );
 }
 
+function yearLabel(profile: { yearOfEducation?: string; grade?: string } | null, isAR: boolean): string {
+  const yo = profile?.yearOfEducation;
+  if (yo) {
+    const opt = YEAR_OF_EDUCATION_OPTIONS.find((o) => o.id === yo);
+    if (opt) return isAR ? opt.ar : opt.en;
+    return yo;
+  }
+  if (profile?.grade === 'g1') return isAR ? 'الأول الثانوي' : 'Grade 10';
+  if (profile?.grade === 'g2') return isAR ? 'الثاني الثانوي' : 'Grade 11';
+  if (profile?.grade === 'g3') return isAR ? 'الثالث الثانوي' : 'Grade 12';
+  return '';
+}
+
 function UserFooter({ onPick }: { onPick?: () => void }) {
   const { locale, t, isAR } = useApp();
   const { user, signOut } = useAuth();
+  const { profile } = useProfile();
+
+  const displayName =
+    profile?.preferredName ||
+    profile?.displayName ||
+    user?.displayName ||
+    (isAR ? 'ضيف' : 'Guest');
+  const photoUrl =
+    profile?.photoURL ||
+    (profile?.avatarStyle && profile?.avatarSeed
+      ? dicebearUrl(profile.avatarStyle as AvatarStyle, profile.avatarSeed)
+      : user?.photoURL || null);
+  const initial = (displayName || (isAR ? 'ي' : 'Y')).slice(0, 1);
+  const yearText = yearLabel(profile, isAR);
+  const profileHref = user
+    ? `/${locale}/u/${(profile?.username || profile?.displayName || user.displayName || 'me')
+        .toLowerCase()
+        .replace(/\s+/g, '-')}`
+    : `/${locale}/sign-in`;
+
   return (
     <div className="border-t border-slate-200 px-4 py-3 flex items-center gap-3">
       <Link
-        href={user ? `/${locale}/u/${(user.displayName ?? 'me').toLowerCase().replace(/\s+/g,'-')}` : `/${locale}/sign-in`}
+        href={profileHref}
         onClick={onPick}
-        className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-300 to-amber-500 grid place-items-center text-white font-bold text-sm"
+        className="w-9 h-9 rounded-full grid place-items-center overflow-hidden bg-gradient-to-br from-amber-300 to-amber-500 text-white font-bold text-sm"
         title={t.nav.profile}
       >
-        {(user?.displayName ?? (isAR ? 'ي' : 'Y')).slice(0, 1)}
+        {photoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={photoUrl} alt="" className="w-full h-full object-cover" />
+        ) : (
+          initial
+        )}
       </Link>
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-semibold text-slate-900 truncate">
-          {user?.displayName ?? (isAR ? 'يوسف الشريف' : 'Youssef Sherif')}
-        </div>
-        <div className="text-[11px] text-slate-500 truncate">{isAR ? '٣ث علمي علوم' : 'G12 Science'}</div>
+        <div className="text-[13px] font-semibold text-slate-900 truncate">{displayName}</div>
+        {yearText && <div className="text-[11px] text-slate-500 truncate">{yearText}</div>}
       </div>
       {user && (
-        <button onClick={() => { signOut(); onPick?.(); }} className="text-[11px] text-slate-400 hover:text-rose-600" title={t.nav.signOut}>
-          ⎋
+        <button
+          onClick={() => { void signOut(); onPick?.(); }}
+          className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500 hover:text-rose-600 bg-slate-50 hover:bg-rose-50 rounded-md px-2 py-1 transition"
+          title={t.nav.signOut}
+          aria-label={t.nav.signOut}
+        >
+          <span aria-hidden="true">⎋</span>
+          <span className="hidden sm:inline">{t.nav.signOut}</span>
         </button>
       )}
     </div>
@@ -120,6 +166,7 @@ export function Sidebar() {
 export function MobileBar() {
   const pathname = usePathname();
   const { t, isAR, setLocale } = useApp();
+  const { user, signOut } = useAuth();
   const [open, setOpen] = useState(false);
   const activeKey = activeKeyFor(pathname);
 
@@ -152,6 +199,16 @@ export function MobileBar() {
             className="text-[12px] font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg px-2.5 py-1.5 transition">
             {isAR ? 'EN' : 'ع'}
           </button>
+          {user && (
+            <button
+              onClick={() => void signOut()}
+              className="text-[12px] font-semibold text-slate-600 hover:text-rose-600 bg-slate-100 hover:bg-rose-50 rounded-lg px-2.5 py-1.5 transition"
+              title={t.nav.signOut}
+              aria-label={t.nav.signOut}
+            >
+              ⎋
+            </button>
+          )}
         </div>
       </div>
 

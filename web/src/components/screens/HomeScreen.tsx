@@ -8,13 +8,20 @@ import { AgentLog, Btn, Card, Confetti, Ring, SubjectChip, type AgentLogLine } f
 import { SUBJECT_META, HUE } from '@/constants/subjects';
 import { HOME_PLAN, WEAK_TOPICS, UPCOMING, ACTIVITY } from '@/constants/seed-data';
 import { callAgent } from '@/lib/agents';
+import { useProfile } from '@/lib/firebase/use-profile';
 
 export default function HomeScreen() {
   const { isAR, t, locale, pulseStreak } = useApp();
   const router = useRouter();
+  const { profile } = useProfile();
   const [intent, setIntent] = useState('');
   const [parsing, setParsing] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const firstName = (profile?.preferredName || profile?.displayName || '').split(' ')[0];
+  const greeting = firstName
+    ? isAR ? `أهلاً ${firstName} 👋` : `Hi ${firstName} 👋`
+    : t.home.greet;
 
   const submit = async (txt: string) => {
     setIntent(txt);
@@ -28,7 +35,7 @@ export default function HomeScreen() {
       <div className="px-5 lg:px-10 py-6 lg:py-8 max-w-[1400px]">
         <div className="flex items-end justify-between gap-4 mb-6">
           <div>
-            <h1 className="text-2xl lg:text-3xl font-extrabold text-slate-900">{t.home.greet}</h1>
+            <h1 className="text-2xl lg:text-3xl font-extrabold text-slate-900">{greeting}</h1>
             <p className="text-slate-500 mt-1 text-[14px]">{t.home.sub}</p>
           </div>
           <div className="hidden lg:flex items-center gap-3 text-[12px] text-slate-500">

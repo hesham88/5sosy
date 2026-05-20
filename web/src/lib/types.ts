@@ -42,8 +42,10 @@ export type ActivityItem = {
 export type Book = {
   id: string;
   subject: SubjectId;
-  arT: string; enT: string;
-  arSub: string; enSub: string;
+  arT: string;
+  enT: string;
+  arSub: string;
+  enSub: string;
   publisher: string;
   year: number;
   chapters: number;
@@ -53,7 +55,9 @@ export type Book = {
   lastAccessedAr?: string;
   lastAccessedEn?: string;
   cover: string;
+  type?: string;
 };
+
 
 export type SubjectProgress = {
   subject: SubjectId;
@@ -76,6 +80,19 @@ export type WeekPlanDay = {
   blocks: PlanBlock[];
 };
 
+export type Curriculum = 'thanaweya' | 'IB' | 'AP' | 'GCSE' | 'other';
+
+export type AvatarStyle =
+  | 'adventurer' | 'lorelei' | 'notionists' | 'bottts' | 'fun-emoji' | 'thumbs';
+
+export type CustomBook = {
+  id: string;
+  name: string;
+  storagePath: string;
+  sizeBytes?: number;
+  mimeType?: string;
+};
+
 export type UserDoc = {
   uid: string;
   displayName: string;
@@ -89,4 +106,52 @@ export type UserDoc = {
   subjects: SubjectId[];
   streak: number;
   xp: number;
+
+  // Onboarding-collected (optional until onboardingCompleted === true)
+  preferredName?: string;
+  age?: number;
+  yearOfEducation?: string;
+  location?: { country: string; city?: string };
+  curriculum?: Curriculum;
+  favoriteSubjects?: SubjectId[];
+  reason?: string;
+  goals?: string;
+  avatarSeed?: string;
+  avatarStyle?: AvatarStyle;
+  onboardingCompleted?: boolean;
+  onboardingCompletedAt?: unknown; // Firestore Timestamp on read
+  lastLoginAt?: unknown;           // Firestore Timestamp on read; drives 24h expiry
 };
+
+export type IngestedBookDetail = {
+  id: string;
+  title: string;
+  stage: string;
+  grade: string;
+  term: string;
+  type: string;
+  status: 'queued' | 'downloading' | 'parsing' | 'completed' | 'failed';
+  progress: number; // 0 to 100
+  govUrl: string;
+};
+
+export type IngestionStatus = {
+  status: 'idle' | 'running' | 'paused' | 'completed' | 'error';
+  pausedByRequest: boolean;
+  logs: {
+    timestamp: string;
+    text: string;
+    status?: 'ok' | 'warn' | 'info' | 'error';
+    agent: string;
+  }[];
+  totalBooks: number;
+  downloadedBooks: number;
+  parsedBooks: number;
+  totalPagesProcessed?: number;
+  progressMessage?: string;
+  percentage: number;
+  activeBookId?: string;
+  activeBookTitle?: string;
+  booksList?: Record<string, IngestedBookDetail>;
+};
+

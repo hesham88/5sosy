@@ -83,11 +83,17 @@ async function upsertUserDoc(u: User) {
         subjects: ['physics', 'chemistry', 'math'],
         streak: 0,
         xp: 0,
+        onboardingCompleted: false,
         createdAt: serverTimestamp(),
-        lastSeenAt: serverTimestamp()
+        lastSeenAt: serverTimestamp(),
+        lastLoginAt: serverTimestamp()
       });
     } else {
-      await setDoc(ref, { lastSeenAt: serverTimestamp() }, { merge: true });
+      await setDoc(
+        ref,
+        { lastSeenAt: serverTimestamp(), lastLoginAt: serverTimestamp() },
+        { merge: true }
+      );
     }
   } catch (e) {
     console.error('upsertUserDoc failed', e);
