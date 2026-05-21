@@ -133,4 +133,17 @@ class CrawlerAgent:
                     all_books.append(item)
                     
         print(f"[Crawler] Finished crawling. Total unique books found: {len(all_books)}")
+        
+        if not all_books:
+            print("[Crawler] Online crawling returned 0 items. Falling back to local crawler_books_fallback.json...")
+            import os
+            fallback_path = os.path.join(os.path.dirname(__file__), "crawler_books_fallback.json")
+            if os.path.exists(fallback_path):
+                try:
+                    with open(fallback_path, "r", encoding="utf-8") as f:
+                        all_books = json.load(f)
+                    print(f"[Crawler] Successfully loaded {len(all_books)} books from fallback file.")
+                except Exception as e:
+                    print(f"[Crawler] Failed to load fallback file: {e}")
+                    
         return all_books

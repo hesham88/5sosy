@@ -29,7 +29,20 @@ class VideoExtractorAgent:
                 data = res.json()
         except Exception as e:
             print(f"[VideoExtractor] Failed to fetch video catalog: {e}")
-            return []
+            data = []
+
+        if not data:
+            print("[VideoExtractor] Video catalog is empty or failed to fetch. Falling back to local videos_fallback.json...")
+            import os
+            import json
+            fallback_path = os.path.join(os.path.dirname(__file__), "videos_fallback.json")
+            if os.path.exists(fallback_path):
+                try:
+                    with open(fallback_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    print(f"[VideoExtractor] Successfully loaded {len(data)} videos from fallback file.")
+                except Exception as fb_err:
+                    print(f"[VideoExtractor] Failed to load fallback file: {fb_err}")
 
         videos_processed = []
         videos_coll = self.db.collection("videos")
