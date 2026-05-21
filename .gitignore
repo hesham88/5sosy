@@ -55,6 +55,7 @@ Meshy_AI_extract_*
 # Folders excluded from this repo (may contain sensitive or unrelated content)
 5sosy_3dmodel/
 claude_prototype/
+coding_agent/
 docs/
 log/
 md/

@@ -6,6 +6,7 @@ import { collection, doc, onSnapshot } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { getFirebase } from '@/lib/firebase/client';
 import { useAuth } from '@/lib/firebase/auth-context';
+import { bookFromFirestore, bookMatchesQuery, compareBooks } from '@/lib/books';
 import { ChromeLayout } from '../shared/Chrome';
 import { useApp } from '../shared/Providers';
 import { AgentLog, Btn, Card, Ring, SubjectChip, type AgentLogLine } from '../shared/atoms';
@@ -33,8 +34,9 @@ export default function BooksScreen() {
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [subjectFilter, setSubjectFilter] = useState<SubjectId | 'all'>(subjectFromUrl ?? 'all');
-  const [activeTab, setActiveTab] = useState<'official' | 'added'>('official');
+  const [activeTab, setActiveTab] = useState<'all' | 'official' | 'added'>('all');
   const [gradeFilter, setGradeFilter] = useState<string | 'all'>('all');
+  const [catalogQuery, setCatalogQuery] = useState('');
 
   const [chatInput, setChatInput] = useState('');
   const [chatMsgs, setChatMsgs] = useState<{ who: 'me' | '5sosy'; ar: string; en: string }[]>([]);
@@ -97,26 +99,7 @@ export default function BooksScreen() {
           let badDocs = 0;
           snapshot.forEach((d) => {
             try {
-              const data = d.data();
-              const title = data.title || data.subject || d.id;
-              list.push({
-                id: d.id,
-                subject: (data.subject as SubjectId) || 'physics',
-                arT: title,
-                enT: title,
-                arSub: `${data.stage || ''} - ${data.grade || ''} (${data.term || ''})`,
-                enSub: `${data.stage || ''} - ${data.grade || ''} (${data.term || ''})`,
-                publisher: data.distributor || data.author || 'MOE',
-                year: data.year || 2026,
-                chapters: data.chapters || 0,
-                pages: data.pages || 0,
-                status: data.status || 'indexed',
-                mastery: 0,
-                cover: '',
-                type: data.type || 'Student Book',
-                _createdAtMs:
-                  typeof data.createdAt?.toMillis === 'function' ? data.createdAt.toMillis() : 0,
-              } as Book & { _createdAtMs: number });
+              list.push(bookFromFirestore(d.id, d.data()));
             } catch (mapErr) {
               badDocs += 1;
               console.warn('[books listener] skipped malformed doc', d.id, mapErr);
@@ -125,17 +108,7 @@ export default function BooksScreen() {
           if (badDocs > 0) {
             console.warn(`[books listener] skipped ${badDocs}/${snapshot.size} malformed docs`);
           }
-          // Newest first; books without createdAt land last in deterministic title order.
-          list.sort((a, b) => {
-            const aMs = (a as Book & { _createdAtMs?: number })._createdAtMs ?? 0;
-            const bMs = (b as Book & { _createdAtMs?: number })._createdAtMs ?? 0;
-            if (aMs !== bMs) return bMs - aMs;
-            try {
-              return (a.arT || '').localeCompare(b.arT || '');
-            } catch {
-              return 0;
-            }
-          });
+          list.sort(compareBooks);
           console.info(`[books listener] received ${snapshot.size} docs, mapped ${list.length}`);
           setDbBooks(list);
           setBooksLoading(false);
@@ -202,27 +175,37 @@ export default function BooksScreen() {
   const officialBooks = useMemo(() => dbBooks.filter(b => b.type !== 'Added Book'), [dbBooks]);
   const addedBooks = useMemo(() => dbBooks.filter(b => b.type === 'Added Book'), [dbBooks]);
 
-  const activeBooks = activeTab === 'official' ? officialBooks : addedBooks;
+  const activeBooks = activeTab === 'official' ? officialBooks : activeTab === 'added' ? addedBooks : dbBooks;
+  const indexedCount = useMemo(() => dbBooks.filter((b) => b.status === 'indexed').length, [dbBooks]);
+  const processingCount = useMemo(
+    () => dbBooks.filter((b) => b.status !== 'indexed' && b.status !== 'error').length,
+    [dbBooks]
+  );
+  const totalPages = useMemo(() => dbBooks.reduce((sum, b) => sum + (b.pages || 0), 0), [dbBooks]);
 
   // Grades list for selector
   const availableGrades = useMemo(() => {
     const grades = new Set<string>();
-    officialBooks.forEach(b => {
-      // Extract grade code (e.g. G10, G11, G12) from sub if stored, or we can use sub fields
+    dbBooks.forEach(b => {
+      if (b.grade) {
+        grades.add(b.grade);
+        return;
+      }
       const match = b.arSub.match(/G\d+/i) || b.enSub.match(/G\d+/i) || b.arSub.match(/الصف\s+(\S+)/);
       if (match) grades.add(match[0].trim());
-      else if (b.arSub.includes('10') || b.enSub.includes('10')) grades.add('G10');
-      else if (b.arSub.includes('11') || b.enSub.includes('11')) grades.add('G11');
-      else if (b.arSub.includes('12') || b.enSub.includes('12')) grades.add('G12');
     });
-    return Array.from(grades).sort();
-  }, [officialBooks]);
+    return Array.from(grades).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+  }, [dbBooks]);
 
   const filtered = useMemo(() => activeBooks.filter((b) => {
     const matchSubject = subjectFilter === 'all' || b.subject === subjectFilter;
-    const matchGrade = gradeFilter === 'all' || b.arSub.toLowerCase().includes(gradeFilter.toLowerCase()) || b.enSub.toLowerCase().includes(gradeFilter.toLowerCase());
-    return matchSubject && matchGrade;
-  }), [activeBooks, subjectFilter, gradeFilter]);
+    const matchGrade =
+      gradeFilter === 'all' ||
+      b.grade === gradeFilter ||
+      b.arSub.toLowerCase().includes(gradeFilter.toLowerCase()) ||
+      b.enSub.toLowerCase().includes(gradeFilter.toLowerCase());
+    return matchSubject && matchGrade && bookMatchesQuery(b, catalogQuery);
+  }), [activeBooks, subjectFilter, gradeFilter, catalogQuery]);
 
   const selectedBooks = useMemo(() => dbBooks.filter((b) => selected.has(b.id)), [dbBooks, selected]);
   const count = selectedBooks.length;
@@ -436,36 +419,66 @@ export default function BooksScreen() {
 
   return (
     <ChromeLayout>
-      <div className="px-5 lg:px-10 py-6 lg:py-8 max-w-[1400px]">
-        {/* Dynamic Vector Search Bar */}
-        <div className="mb-8 relative max-w-2xl mx-auto">
-          <div className="relative flex items-center rounded-2xl bg-white/70 backdrop-blur-md border border-slate-200/80 shadow-md p-1.5 focus-within:border-sky-500 focus-within:ring-2 focus-within:ring-sky-200/60 transition duration-300">
-            <span className="text-xl px-3 text-slate-400">🔍</span>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleVectorSearch()}
-              placeholder={isAR ? 'ابحثSemantically في صفحات الكتب (مثال: قوانين الحركة الحرارية)...' : 'Semantic search inside book pages (e.g. thermodynamics)...'}
-              className="flex-1 bg-transparent border-none text-[14px] text-slate-800 focus:outline-none py-2"
-            />
-            <button
-              onClick={handleVectorSearch}
-              className="bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-[12.5px] px-5 py-2 rounded-xl transition shadow-sm"
-            >
-              {isAR ? 'بحث ذكي' : 'Search'}
-            </button>
-          </div>
-        </div>
+      <div className="px-5 lg:px-10 py-6 lg:py-8 max-w-[1500px] mx-auto">
+        <div className="mb-6 rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div className="p-5 lg:p-6 flex flex-col gap-5">
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+              <div className="min-w-0">
+                <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-bold text-emerald-700 border border-emerald-100">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  {isAR ? 'متصل بقاعدة Firestore' : 'Live from Firestore'}
+                </div>
+                <h1 className="text-2xl lg:text-3xl font-extrabold text-slate-950 mt-3">{t.books.title}</h1>
+                <p className="text-slate-500 mt-1 text-[14px] max-w-3xl">{t.books.sub}</p>
+              </div>
+              <Btn kind="outline" size="sm" onClick={() => setShowSyncDashboard((prev) => !prev)}>
+                🔄 {isAR ? 'لوحة المزامنة' : 'Sync Console'}
+              </Btn>
+            </div>
 
-        <div className="flex items-end justify-between gap-4 mb-6 flex-wrap">
-          <div>
-            <h1 className="text-2xl lg:text-3xl font-extrabold text-slate-900">{t.books.title}</h1>
-            <p className="text-slate-500 mt-1 text-[14px]">{t.books.sub}</p>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <LibraryStat label={isAR ? 'كل الكتب' : 'Books'} value={dbBooks.length} tone="slate" />
+              <LibraryStat label={t.books.indexed} value={indexedCount} tone="emerald" />
+              <LibraryStat label={isAR ? 'قيد المعالجة' : 'In progress'} value={processingCount} tone="amber" />
+              <LibraryStat label={t.books.pages} value={totalPages} tone="sky" />
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-12 gap-3">
+              <label className="xl:col-span-5 min-w-0">
+                <span className="sr-only">{isAR ? 'بحث في المكتبة' : 'Search library catalog'}</span>
+                <div className="flex items-center gap-2 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2.5 focus-within:border-slate-400 transition">
+                  <span className="text-slate-400">⌕</span>
+                  <input
+                    type="text"
+                    value={catalogQuery}
+                    onChange={(e) => setCatalogQuery(e.target.value)}
+                    placeholder={isAR ? 'ابحث باسم الكتاب، الصف، الترم، المادة...' : 'Find by title, grade, term, subject...'}
+                    className="flex-1 bg-transparent border-none text-[13.5px] text-slate-800 focus:outline-none min-w-0"
+                  />
+                </div>
+              </label>
+
+              <div className="xl:col-span-7 min-w-0">
+                <div className="relative flex items-center rounded-xl bg-white border border-slate-200 p-1.5 focus-within:border-sky-500 focus-within:ring-2 focus-within:ring-sky-200/60 transition">
+                  <span className="text-lg px-2 text-slate-400">🔍</span>
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleVectorSearch()}
+                    placeholder={isAR ? 'ابحث داخل صفحات الكتب بالذكاء الاصطناعي...' : 'Semantic search inside book pages...'}
+                    className="flex-1 bg-transparent border-none text-[13.5px] text-slate-800 focus:outline-none py-1.5 min-w-0"
+                  />
+                  <button
+                    onClick={handleVectorSearch}
+                    className="bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-[12.5px] px-4 py-2 rounded-lg transition shadow-sm whitespace-nowrap"
+                  >
+                    {isAR ? 'بحث ذكي' : 'AI Search'}
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
-          <Btn kind="outline" size="sm" onClick={() => setShowSyncDashboard((prev) => !prev)}>
-            🔄 {isAR ? 'لوحة المزامنة' : 'Sync Console'}
-          </Btn>
         </div>
 
         {/* Ingestion Sync Control Center */}
@@ -729,92 +742,92 @@ export default function BooksScreen() {
           </Card>
         )}
 
-        {/* Tab Selector */}
-        <div className="flex border-b border-slate-200 mb-6">
-          <button
-            onClick={() => { setActiveTab('official'); setGradeFilter('all'); }}
-            className={`px-6 py-3 font-extrabold text-[15px] border-b-2 transition ${
-              activeTab === 'official'
-                ? 'border-sky-600 text-sky-700'
-                : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            📚 {isAR ? 'الكتب الدراسية الرسمية' : 'Official Ministry Books'}
-          </button>
-          <button
-            onClick={() => { setActiveTab('added'); setGradeFilter('all'); }}
-            className={`px-6 py-3 font-extrabold text-[15px] border-b-2 transition ${
-              activeTab === 'added'
-                ? 'border-sky-600 text-sky-700'
-                : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            📂 {isAR ? 'المصادر والكتب المضافة' : 'Added Books / Resources'}
-          </button>
-        </div>
-
-        {/* Filters Panel */}
-        <div className="flex flex-wrap items-center gap-2 mb-5 bg-white border border-slate-200/60 p-3 rounded-2xl shadow-sm">
-          {/* Grade Filter for Official Books */}
-          {activeTab === 'official' && (
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-[12px] font-bold text-slate-400 px-2 uppercase">{isAR ? 'السنة الدراسية:' : 'Grade/Year:'}</span>
-              <FilterPill active={gradeFilter === 'all'} onClick={() => setGradeFilter('all')}>
-                {t.books.filterAll}
-              </FilterPill>
-              {availableGrades.map((g) => (
-                <FilterPill key={g} active={gradeFilter === g} onClick={() => setGradeFilter(g)}>
-                  {g}
-                </FilterPill>
-              ))}
-              <div className="w-px h-6 bg-slate-200 mx-2" />
+        <div className="mb-5 space-y-3">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div className="inline-flex rounded-xl bg-slate-100 border border-slate-200 p-1 w-full sm:w-fit overflow-x-auto slim">
+              <CatalogTab
+                active={activeTab === 'all'}
+                onClick={() => { setActiveTab('all'); setGradeFilter('all'); }}
+                label={isAR ? 'كل الكتب' : 'All books'}
+                count={dbBooks.length}
+              />
+              <CatalogTab
+                active={activeTab === 'official'}
+                onClick={() => { setActiveTab('official'); setGradeFilter('all'); }}
+                label={isAR ? 'كتب الوزارة' : 'Ministry'}
+                count={officialBooks.length}
+              />
+              <CatalogTab
+                active={activeTab === 'added'}
+                onClick={() => { setActiveTab('added'); setGradeFilter('all'); }}
+                label={isAR ? 'المضافة' : 'Added'}
+                count={addedBooks.length}
+              />
             </div>
-          )}
 
-          {/* Subject Filter */}
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-[12px] font-bold text-slate-400 px-2 uppercase">{isAR ? 'المادة:' : 'Subject:'}</span>
-            <FilterPill active={subjectFilter === 'all'} onClick={() => setSubjectFilter('all')}>
-              {t.books.filterAll}
-            </FilterPill>
-            {Object.keys(SUBJECT_META).map((s) => {
-              const meta = SUBJECT_META[s as SubjectId];
-              const h = HUE[meta.hue];
-              return (
-                <button
-                  key={s}
-                  onClick={() => setSubjectFilter(s as SubjectId)}
-                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-semibold border transition
-                    ${subjectFilter === s ? `${h.dot} text-white border-transparent` : 'bg-slate-50 text-slate-600 border-slate-200 hover:border-slate-300'}`}
-                >
-                  <span>{meta.glyph}</span>
-                  <span>{isAR ? meta.ar : meta.en}</span>
+            <div className="flex items-center gap-2 text-[12px] justify-end">
+              <span className="text-slate-500">
+                {filtered.length} {isAR ? 'نتيجة' : filtered.length === 1 ? 'result' : 'results'}
+              </span>
+              {count > 0 ? (
+                <>
+                  <span className="font-bold text-sky-700">
+                    {count} {count === 1 ? t.books.selected : t.books.selectedPlural}
+                  </span>
+                  <button onClick={clearAll} className="text-slate-500 hover:text-rose-600 font-semibold">
+                    {t.books.clear}
+                  </button>
+                </>
+              ) : (
+                <button onClick={selectAllIndexed} className="text-slate-500 hover:text-sky-700 font-semibold">
+                  {t.books.selectAll}
                 </button>
-              );
-            })}
+              )}
+            </div>
           </div>
 
-          <div className="ms-auto flex items-center gap-2 text-[12px]">
-            {count > 0 && (
-              <>
-                <span className="font-bold text-sky-700">
-                  {count} {count === 1 ? t.books.selected : t.books.selectedPlural}
-                </span>
-                <button onClick={clearAll} className="text-slate-500 hover:text-rose-600 font-semibold">
-                  {t.books.clear}
-                </button>
-              </>
+          <div className="flex flex-wrap items-center gap-2 bg-white border border-slate-200 p-3 rounded-xl shadow-sm">
+            {availableGrades.length > 0 && (
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[12px] font-bold text-slate-400 px-2 uppercase">{isAR ? 'الصف:' : 'Grade:'}</span>
+                <FilterPill active={gradeFilter === 'all'} onClick={() => setGradeFilter('all')}>
+                  {t.books.filterAll}
+                </FilterPill>
+                {availableGrades.map((g) => (
+                  <FilterPill key={g} active={gradeFilter === g} onClick={() => setGradeFilter(g)}>
+                    {g}
+                  </FilterPill>
+                ))}
+                <div className="hidden md:block w-px h-6 bg-slate-200 mx-2" />
+              </div>
             )}
-            {count === 0 && (
-              <button onClick={selectAllIndexed} className="text-slate-500 hover:text-sky-700 font-semibold">
-                {t.books.selectAll}
-              </button>
-            )}
+
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[12px] font-bold text-slate-400 px-2 uppercase">{isAR ? 'المادة:' : 'Subject:'}</span>
+              <FilterPill active={subjectFilter === 'all'} onClick={() => setSubjectFilter('all')}>
+                {t.books.filterAll}
+              </FilterPill>
+              {Object.keys(SUBJECT_META).map((s) => {
+                const meta = SUBJECT_META[s as SubjectId];
+                const h = HUE[meta.hue];
+                return (
+                  <button
+                    key={s}
+                    onClick={() => setSubjectFilter(s as SubjectId)}
+                    className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-semibold border transition
+                      ${subjectFilter === s ? `${h.dot} text-white border-transparent` : 'bg-slate-50 text-slate-600 border-slate-200 hover:border-slate-300'}`}
+                  >
+                    <span>{meta.glyph}</span>
+                    <span>{isAR ? meta.ar : meta.en}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 
         {/* Book Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 lg:gap-5">
           {/* Uploader Card inside Added Books Tab */}
           {activeTab === 'added' && (
             <div className="rounded-2xl border-2 border-dashed border-slate-200 p-6 flex flex-col items-center justify-center text-center bg-slate-50/50 hover:bg-slate-50 transition duration-300">
@@ -933,7 +946,7 @@ export default function BooksScreen() {
               {activeTab === 'added' && (
                 <button
                   onClick={() => handleDeleteBook(b.id)}
-                  className="absolute top-2 left-2 z-10 w-7 h-7 rounded-full bg-rose-50 border border-rose-200 text-rose-600 hover:bg-rose-500 hover:text-white transition grid place-items-center opacity-0 group-hover:opacity-100 shadow-sm"
+                  className="absolute top-2 start-2 z-10 w-7 h-7 rounded-full bg-rose-50 border border-rose-200 text-rose-600 hover:bg-rose-500 hover:text-white transition grid place-items-center opacity-0 group-hover:opacity-100 shadow-sm"
                   title={isAR ? 'حذف هذا الكتاب' : 'Delete this book'}
                 >
                   ✕
@@ -1074,6 +1087,38 @@ export default function BooksScreen() {
   );
 }
 
+function LibraryStat({ label, value, tone }: { label: string; value: number; tone: 'slate' | 'emerald' | 'amber' | 'sky' }) {
+  const { locale } = useApp();
+  const cls = tone === 'emerald' ? 'bg-emerald-50 border-emerald-100 text-emerald-700'
+            : tone === 'amber' ? 'bg-amber-50 border-amber-100 text-amber-700'
+            : tone === 'sky' ? 'bg-sky-50 border-sky-100 text-sky-700'
+            : 'bg-slate-50 border-slate-200 text-slate-700';
+  return (
+    <div className={`rounded-xl border px-4 py-3 ${cls}`}>
+      <div className="text-[11px] font-bold uppercase tracking-wide opacity-75">{label}</div>
+      <div className="mt-1 text-2xl font-extrabold ltr text-start">
+        {new Intl.NumberFormat(locale).format(value)}
+      </div>
+    </div>
+  );
+}
+
+function CatalogTab({ active, onClick, label, count }: { active: boolean; onClick: () => void; label: string; count: number }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`inline-flex shrink-0 items-center gap-2 rounded-lg px-4 py-2 text-[13px] font-extrabold transition ${
+        active ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+      }`}
+    >
+      <span>{label}</span>
+      <span className={`rounded-full px-2 py-0.5 text-[11px] ${active ? 'bg-sky-50 text-sky-700' : 'bg-white/70 text-slate-500'}`}>
+        {count}
+      </span>
+    </button>
+  );
+}
+
 function FilterPill({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
@@ -1089,68 +1134,151 @@ function FilterPill({ active, onClick, children }: { active: boolean; onClick: (
 function BookCard({ book, selected, onToggle, onViewDetails }: { book: Book; selected: boolean; onToggle: () => void; onViewDetails: () => void }) {
   const { isAR, t } = useApp();
   const meta = SUBJECT_META[book.subject] || { glyph: '📚', hue: 'stone', ar: book.subject, en: book.subject };
-  const h = HUE[meta.hue as HueId] || HUE.stone;
   const isLocked = book.status !== 'indexed';
+  const isAdded = book.type === 'Added Book';
+  const subtitle = isAR ? book.arSub : book.enSub;
+  const details = [
+    book.grade,
+    book.term,
+    book.language ? book.language.toUpperCase() : '',
+  ].filter(Boolean);
 
   return (
     <div
-      className={`relative text-start group rounded-2xl border bg-white overflow-hidden transition-all
-        ${selected ? 'border-sky-500 ring-2 ring-sky-200 shadow-md' : 'border-slate-200 hover:border-slate-300 hover:shadow-sm'}
-        ${isLocked ? 'opacity-75' : 'card-lift'}`}
+      className={`relative text-start group rounded-2xl border bg-white overflow-hidden transition-all min-h-[380px] flex flex-col
+        ${selected ? 'border-sky-500 ring-2 ring-sky-200 shadow-md' : 'border-slate-200 hover:border-slate-300 hover:shadow-md'}
+        ${isLocked ? 'opacity-80' : 'card-lift'}`}
     >
-      {/* Clickable cover to view book details */}
       <div
         onClick={() => { if (!isLocked) onViewDetails(); }}
-        className={`relative aspect-[5/3] ${h.bg} grid place-items-center ${isLocked ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+        className={`relative aspect-[4/3] grid place-items-center overflow-hidden ${isLocked ? 'cursor-not-allowed' : 'cursor-pointer'}`}
         style={{ background: gradientFor(meta.hue as HueId) }}
       >
-        <div className="text-6xl drop-shadow-sm">{meta.glyph}</div>
-        <div className="absolute top-3 start-3">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_25%_20%,rgba(255,255,255,0.55),transparent_28%),linear-gradient(180deg,rgba(15,23,42,0.02),rgba(15,23,42,0.24))]" />
+        <div className="relative w-[58%] max-w-[190px] aspect-[3/4] rounded-xl bg-white/92 shadow-xl border border-white/70 p-4 flex flex-col justify-between">
+          <div>
+            <div className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wide line-clamp-1">
+              {book.type || (isAR ? 'كتاب' : 'Book')}
+            </div>
+            <div className="mt-3 text-5xl drop-shadow-sm">{meta.glyph}</div>
+          </div>
+          <div className="space-y-1">
+            <div className="h-1.5 rounded-full bg-slate-200" />
+            <div className="h-1.5 rounded-full bg-slate-100 w-2/3" />
+          </div>
+        </div>
+        <div className="absolute top-3 start-3 flex items-center gap-2">
           <StatusBadge status={book.status} />
         </div>
-        <div className="absolute bottom-3 end-3">
-          <Ring value={book.mastery} size={36} stroke={4} />
+        <div className="absolute bottom-3 start-3 flex gap-1.5">
+          {book.year > 0 && (
+            <span className="rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-bold text-slate-700 shadow-sm ltr">
+              {book.year}
+            </span>
+          )}
+          {isAdded && (
+            <span className="rounded-full bg-slate-900/85 px-2.5 py-1 text-[11px] font-bold text-white shadow-sm">
+              {isAR ? 'مضاف' : 'Added'}
+            </span>
+          )}
+        </div>
+        <div className="absolute bottom-3 end-3 rounded-full bg-white/90 p-1 shadow-sm">
+          <Ring value={book.mastery} size={34} stroke={4} />
         </div>
       </div>
 
-      <div className="p-4">
-        {/* Toggle selection checkbox */}
+      <div className="p-4 flex-1 flex flex-col">
         {!isLocked && (
           <button
             onClick={onToggle}
-            className="absolute top-3.5 right-3.5 z-10 w-7 h-7 rounded-full grid place-items-center border-2 transition bg-white/95 border-slate-200 hover:border-sky-500 shadow-sm"
+            className="absolute top-3.5 end-3.5 z-10 w-8 h-8 rounded-full grid place-items-center border transition bg-white/95 border-white/80 hover:border-sky-500 shadow-sm"
+            aria-label={selected ? 'Deselect book' : 'Select book'}
           >
-            <div className={`w-4 h-4 rounded-full ${selected ? 'bg-sky-600' : 'bg-transparent'} transition`} />
+            <div className={`w-4 h-4 rounded-full border ${selected ? 'bg-sky-600 border-sky-600' : 'bg-transparent border-slate-300'} transition`} />
           </button>
         )}
 
-        <SubjectChip id={book.subject} size="sm" />
-        <div
+        <div className="flex items-center justify-between gap-2">
+          <SubjectChip id={book.subject} size="sm" />
+          {book.sourceUrl && (
+            <a
+              href={book.sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 text-[11px] font-bold text-sky-700 hover:text-sky-900"
+              title={isAR ? 'افتح مصدر الكتاب' : 'Open book source'}
+            >
+              ↗ {isAR ? 'المصدر' : 'Source'}
+            </a>
+          )}
+        </div>
+
+        <button
           onClick={() => { if (!isLocked) onViewDetails(); }}
-          className={`font-extrabold text-slate-900 text-[14.5px] mt-2 leading-snug line-clamp-2 ${isLocked ? '' : 'hover:text-sky-600 cursor-pointer transition'}`}
+          className={`font-extrabold text-slate-950 text-[15px] mt-3 leading-snug line-clamp-2 text-start ${
+            isLocked ? 'cursor-not-allowed' : 'hover:text-sky-700 cursor-pointer transition'
+          }`}
         >
           {isAR ? book.arT : book.enT}
+        </button>
+
+        <div className="text-[12px] text-slate-500 mt-1.5 line-clamp-2 min-h-[36px]">{subtitle}</div>
+
+        <div className="grid grid-cols-2 gap-2 mt-4 text-[11.5px]">
+          <BookFact label={t.books.pages} value={book.pages ? String(book.pages) : '0'} />
+          <BookFact label={t.books.chapters} value={book.chapters ? String(book.chapters) : '0'} />
+          <BookFact label={t.books.year} value={book.year ? String(book.year) : '-'} />
+          <BookFact label={isAR ? 'النوع' : 'Type'} value={book.type || '-'} />
         </div>
-        <div className="text-[11.5px] text-slate-500 mt-1 line-clamp-1">{isAR ? book.arSub : book.enSub}</div>
-        <div className="flex items-center gap-3 text-[11px] text-slate-500 mt-3 ltr">
-          <span>{book.chapters} {t.books.chapters}</span>
-          <span>·</span>
-          <span>{book.pages} {t.books.pages}</span>
+
+        {details.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {details.slice(0, 3).map((item) => (
+              <span key={item} className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600">
+                {item}
+              </span>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-auto pt-4 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[10.5px] font-bold text-slate-400 uppercase">{t.books.publisher}</div>
+            <div className="text-[12px] font-semibold text-slate-700 truncate">{book.publisher}</div>
+          </div>
+          <button
+            onClick={() => { if (!isLocked) onViewDetails(); }}
+            disabled={isLocked}
+            className="shrink-0 rounded-lg bg-slate-950 px-3 py-2 text-[12px] font-bold text-white hover:bg-sky-700 disabled:bg-slate-200 disabled:text-slate-500 transition"
+          >
+            {isAR ? 'فتح' : 'Open'}
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
+function BookFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg bg-slate-50 border border-slate-100 px-2.5 py-2 min-w-0">
+      <div className="text-[10px] uppercase font-bold text-slate-400 truncate">{label}</div>
+      <div className="text-[12px] font-extrabold text-slate-800 truncate mt-0.5">{value}</div>
+    </div>
+  );
+}
+
 function StatusBadge({ status }: { status: Book['status'] }) {
-  const { t } = useApp();
+  const { t, isAR } = useApp();
   const cls = status === 'indexed' ? 'bg-emerald-500 text-white'
-            : status === 'processing' ? 'bg-amber-500 text-white animate-pulse'
-            : 'bg-slate-400 text-white';
+            : status === 'error' ? 'bg-rose-600 text-white'
+            : status === 'processing' || status === 'downloading' || status === 'parsing' ? 'bg-amber-500 text-white animate-pulse'
+            : 'bg-slate-500 text-white';
   const label = status === 'indexed' ? t.books.indexed
-              : status === 'processing' ? t.books.processing
+              : status === 'error' ? (isAR ? 'خطأ' : 'Error')
+              : status === 'processing' || status === 'downloading' || status === 'parsing' ? t.books.processing
               : t.books.queued;
-  const glyph = status === 'indexed' ? '✓' : status === 'processing' ? '⟳' : '⏳';
+  const glyph = status === 'indexed' ? '✓' : status === 'error' ? '!' : status === 'processing' || status === 'downloading' || status === 'parsing' ? '⟳' : '⏳';
   return (
     <span className={`inline-flex items-center gap-1 ${cls} rounded-full px-2 py-0.5 text-[10.5px] font-bold uppercase tracking-wide`}>
       <span className="ltr">{glyph}</span><span>{label}</span>

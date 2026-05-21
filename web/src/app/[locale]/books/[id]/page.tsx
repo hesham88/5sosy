@@ -4,12 +4,13 @@ import { use, useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { collection, doc, getDoc, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { getFirebase } from '@/lib/firebase/client';
+import { bookFromFirestore } from '@/lib/books';
 import { ChromeLayout } from '@/components/shared/Chrome';
 import { useApp } from '@/components/shared/Providers';
 import { Card, Btn, SubjectChip } from '@/components/shared/atoms';
-import { SUBJECT_META, HUE, type HueId } from '@/constants/subjects';
+import { SUBJECT_META } from '@/constants/subjects';
 import { callAgent } from '@/lib/agents';
-import type { Book, SubjectId } from '@/lib/types';
+import type { Book } from '@/lib/types';
 
 export default function Page({ params }: { params: Promise<{ locale: string; id: string }> }) {
   const { locale, id } = use(params);
@@ -42,22 +43,7 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
         return;
       }
       const data = snapshot.data();
-      setBook({
-        id: snapshot.id,
-        subject: (data.subject as SubjectId) || 'physics',
-        arT: data.title || data.subject,
-        enT: data.title || data.subject,
-        arSub: `${data.stage || ''} - ${data.grade || ''} (${data.term || ''})`,
-        enSub: `${data.stage || ''} - ${data.grade || ''} (${data.term || ''})`,
-        publisher: data.distributor || data.author || 'MOE',
-        year: data.year || 2026,
-        chapters: data.chapters || 0,
-        pages: data.pages || 0,
-        status: data.status || 'indexed',
-        mastery: 0,
-        cover: '',
-        type: data.type || 'Student Book',
-      });
+      setBook(bookFromFirestore(snapshot.id, data));
 
       // Pages source preference order:
       //   1. New: `books/{id}/content/full.pagesList` — written by lean indexer

@@ -42,6 +42,7 @@ export type ActivityItem = {
 export type Book = {
   id: string;
   subject: SubjectId;
+  rawSubject?: string;
   arT: string;
   enT: string;
   arSub: string;
@@ -50,12 +51,21 @@ export type Book = {
   year: number;
   chapters: number;
   pages: number;
-  status: 'indexed' | 'processing' | 'queued';
+  status: 'indexed' | 'processing' | 'queued' | 'downloading' | 'parsing' | 'error';
   mastery: number;
   lastAccessedAr?: string;
   lastAccessedEn?: string;
   cover: string;
   type?: string;
+  stage?: string;
+  grade?: string;
+  term?: string;
+  language?: string;
+  sourceUrl?: string;
+  storagePath?: string;
+  errorMessage?: string;
+  createdAtMs?: number;
+  updatedAtMs?: number;
 };
 
 
@@ -110,17 +120,23 @@ export type UserDoc = {
   // Onboarding-collected (optional until onboardingCompleted === true)
   preferredName?: string;
   age?: number;
+  country?: string;
+  educationSystem?: string;
   yearOfEducation?: string;
-  location?: { country: string; city?: string };
-  curriculum?: Curriculum;
-  favoriteSubjects?: SubjectId[];
-  reason?: string;
-  goals?: string;
+  interests?: string;
   avatarSeed?: string;
   avatarStyle?: AvatarStyle;
   onboardingCompleted?: boolean;
   onboardingCompletedAt?: unknown; // Firestore Timestamp on read
   lastLoginAt?: unknown;           // Firestore Timestamp on read; drives 24h expiry
+
+  // Legacy onboarding fields — no longer collected as of 2026-05-21, kept so
+  // existing user docs from earlier onboarding versions still typecheck.
+  location?: { country: string; city?: string };
+  curriculum?: Curriculum;
+  favoriteSubjects?: SubjectId[];
+  reason?: string;
+  goals?: string;
 };
 
 export type IngestedBookDetail = {

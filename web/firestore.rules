@@ -10,7 +10,19 @@ service cloud.firestore {
     // Curriculum / catalogue / content — public read, no writes from client
     match /subjects/{subjectId}        { allow read: if true; allow write: if false; }
     match /textbooks/{textbookId}      { allow read: if true; allow write: if false; }
-    match /books/{bookId}              { allow read: if true; allow write: if false; }
+    match /books/{bookId} {
+      allow read: if true;
+      allow write: if false;
+
+      match /content/{contentId} {
+        allow read: if true;
+        allow write: if false;
+      }
+      match /pages/{pageId} {
+        allow read: if true;
+        allow write: if false;
+      }
+    }
     match /chapters/{chapterId}        { allow read: if true; allow write: if false; }
     match /concepts/{conceptId}        { allow read: if true; allow write: if false; }
     match /quizQuestions/{qid}         { allow read: if true; allow write: if false; }
