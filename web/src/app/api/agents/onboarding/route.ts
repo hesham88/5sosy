@@ -5,48 +5,60 @@ export const dynamic = 'force-dynamic';
 
 type SimStep = {
   key: string;
-  input_type: 'text' | 'number' | 'choice' | 'multi_choice' | 'avatar' | 'upload';
+  input_type: 'text' | 'number' | 'choice' | 'avatar';
   ar: string;
   en: string;
   options?: { id: string; ar: string; en: string }[];
+  // When the user picked "other" on this key, the next turn re-asks the same
+  // key as a free-text question so they can type their own answer.
+  otherFollowupAr?: string;
+  otherFollowupEn?: string;
 };
 
 const SIM_PLAN: SimStep[] = [
   { key: 'preferredName', input_type: 'text', ar: 'أهلاً! إيه الاسم اللي تحب أناديك بيه؟', en: 'Hi! What would you like me to call you?' },
   { key: 'age',            input_type: 'number', ar: 'كم سنك؟', en: 'How old are you?' },
-  { key: 'yearOfEducation', input_type: 'choice', ar: 'في أي صف دراسي؟', en: 'What grade are you in?', options: [
-    { id: 'G10', ar: 'الأول الثانوي',  en: 'Grade 10' },
-    { id: 'G11', ar: 'الثاني الثانوي', en: 'Grade 11' },
-    { id: 'G12', ar: 'الثالث الثانوي', en: 'Grade 12' },
-    { id: 'other', ar: 'غير ذلك',      en: 'Other' }
-  ]},
-  { key: 'location', input_type: 'text', ar: 'فين عايش؟ (المدينة، الدولة)', en: 'Where do you live? (city, country)' },
-  { key: 'curriculum', input_type: 'choice', ar: 'إيه المنهج اللي بتدرسه؟', en: 'Which curriculum do you follow?', options: [
-    { id: 'thanaweya', ar: 'الثانوية العامة', en: 'Thanaweya Amma' },
-    { id: 'IB',        ar: 'بكالوريا دولية (IB)', en: 'IB' },
-    { id: 'AP',        ar: 'AP الأمريكية', en: 'AP (American)' },
-    { id: 'GCSE',      ar: 'GCSE البريطانية', en: 'GCSE (British)' },
-    { id: 'other',     ar: 'منهج آخر', en: 'Other' }
-  ]},
-  { key: 'favoriteSubjects', input_type: 'multi_choice', ar: 'إيه المواد اللي بتحبها أكتر؟', en: 'Which subjects do you love the most?', options: [
-    { id: 'physics',   ar: 'فيزياء',     en: 'Physics' },
-    { id: 'chemistry', ar: 'كيمياء',     en: 'Chemistry' },
-    { id: 'biology',   ar: 'أحياء',       en: 'Biology' },
-    { id: 'math',      ar: 'رياضيات',     en: 'Math' },
-    { id: 'arabic',    ar: 'لغة عربية',  en: 'Arabic' },
-    { id: 'english',   ar: 'لغة انجليزية', en: 'English' },
-    { id: 'history',   ar: 'تاريخ',       en: 'History' },
-    { id: 'geography', ar: 'جغرافيا',     en: 'Geography' }
-  ]},
-  { key: 'reason', input_type: 'text', ar: 'إيه اللي جابك لـ5sosy؟', en: 'What brought you to 5sosy?' },
-  { key: 'goals',  input_type: 'text', ar: 'إيه هدفك في الشهر الجاي؟', en: "What's your goal for the next month?" },
-  { key: 'customBooks', input_type: 'upload', ar: 'عندك كتب أو ملازم خاصة بيك تحب أذاكر معاك منها؟ (اختياري)', en: "Have any of your own books or notes you'd like me to study with you? (optional)" },
+  { key: 'country', input_type: 'text', ar: 'في أي دولة عايش؟', en: 'Which country do you live in?' },
+  { key: 'yearOfEducation', input_type: 'choice',
+    ar: 'في أي سنة دراسية؟', en: 'What year of education are you in?',
+    otherFollowupAr: 'تمام، اكتب صفك أو سنتك الدراسية بالظبط.',
+    otherFollowupEn: 'OK — what\'s your exact grade or year?',
+    options: [
+      { id: 'G10', ar: 'الصف العاشر',     en: 'Grade 10' },
+      { id: 'G11', ar: 'الصف الحادي عشر', en: 'Grade 11' },
+      { id: 'G12', ar: 'الصف الثاني عشر', en: 'Grade 12' },
+      { id: 'bachelor1', ar: 'الجامعة، سنة أولى', en: "Bachelor's, year 1" },
+      { id: 'bachelor2', ar: 'الجامعة، سنة ثانية', en: "Bachelor's, year 2" },
+      { id: 'bachelor3', ar: 'الجامعة، سنة ثالثة', en: "Bachelor's, year 3" },
+      { id: 'bachelor4', ar: 'الجامعة، سنة رابعة', en: "Bachelor's, year 4" },
+      { id: 'graduate',  ar: 'دراسات عليا',         en: 'Graduate' },
+      { id: 'other',     ar: 'غير ذلك',              en: 'Other' },
+      { id: 'skip',      ar: 'تخطى',                 en: 'Skip' }
+    ]
+  },
+  { key: 'interests', input_type: 'text',
+    ar: 'إيه المواضيع اللي بتشدك؟ مواد بتحبها، حاجات نفسك تعرفها، هوايات — أي حاجة في بالك.',
+    en: 'What topics interest you the most? Subjects you love, things you want to learn, hobbies — anything on your mind.' },
   { key: 'avatar', input_type: 'avatar', ar: 'آخر خطوة — اختار شكلك (avatar)!', en: 'Last step — pick an avatar!' }
 ];
 
+// Returns the next step OR a follow-up version of the current step if the user
+// picked "other" on a choice question that supports it.
 function nextSimStep(collected: Record<string, unknown>): SimStep | null {
   for (const step of SIM_PLAN) {
-    if (collected[step.key] === undefined || collected[step.key] === null) return step;
+    const v = collected[step.key];
+    if (v === undefined || v === null) return step;
+    // "other" on choice steps → re-emit as a free-text follow-up with the same key.
+    if (v === 'other' && step.otherFollowupAr && step.otherFollowupEn) {
+      return {
+        ...step,
+        input_type: 'text',
+        ar: step.otherFollowupAr,
+        en: step.otherFollowupEn,
+        options: undefined
+      };
+    }
+    // "skip" is a valid answer — move on.
   }
   return null;
 }

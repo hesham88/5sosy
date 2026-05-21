@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
-import { ref as storageRef, uploadBytes } from 'firebase/storage';
 import { useApp } from '../shared/Providers';
 import { Btn, Logo } from '../shared/atoms';
 import { useAuth } from '@/lib/firebase/auth-context';
@@ -11,17 +10,31 @@ import { useProfile } from '@/lib/firebase/use-profile';
 import { getFirebase } from '@/lib/firebase/client';
 import { dicebearUrl, randomSeed } from '@/lib/avatar';
 import { AVATAR_SEED_PALETTE, AVATAR_STYLES } from '@/constants/onboarding';
-import type { AvatarStyle, CustomBook, SubjectId } from '@/lib/types';
+import type { AvatarStyle } from '@/lib/types';
 
-type InputType = 'text' | 'number' | 'choice' | 'multi_choice' | 'avatar' | 'upload';
+type InputType = 'text' | 'number' | 'choice' | 'avatar';
+
+type ChoiceOption = {
+  id: string;
+  ar?: string;
+  en?: string;
+  // Some agent versions emit a single locale-collapsed `label` instead of
+  // ar/en. Tolerate it so buttons don't render empty.
+  label?: string;
+};
 
 type NextStepQuestion = {
   kind: 'question';
   key: string;
   agent_text: string;
   input_type: InputType;
-  options?: { id: string; ar: string; en: string }[];
+  options?: ChoiceOption[];
 };
+
+function optionLabel(opt: ChoiceOption, isAR: boolean): string {
+  const primary = isAR ? opt.ar : opt.en;
+  return primary || opt.label || opt.ar || opt.en || opt.id;
+}
 
 type NextStepComplete = {
   kind: 'complete';
@@ -188,34 +201,13 @@ export default function OnboardingScreen() {
       try {
         const { db } = getFirebase();
         const userRef = doc(db, 'users', user.uid);
-        const books = (finalProfile.customBooks as CustomBook[] | undefined) ?? [];
         const profileWrite: Record<string, unknown> = {
           ...finalProfile,
           onboardingCompleted: true,
           onboardingCompletedAt: serverTimestamp()
         };
-        if (Array.isArray(profileWrite.favoriteSubjects)) {
-          profileWrite.favoriteSubjects = (profileWrite.favoriteSubjects as string[]).filter(Boolean);
-        }
-        // Mirror favoriteSubjects into the catalogue-facing `subjects` field so
-        // existing screens that key off `subjects` start showing the user's picks.
-        if (Array.isArray(profileWrite.favoriteSubjects) && profileWrite.favoriteSubjects.length) {
-          profileWrite.subjects = profileWrite.favoriteSubjects as SubjectId[];
-        }
-        delete profileWrite.customBooks;
 
         await setDoc(userRef, profileWrite, { merge: true });
-
-        for (const b of books) {
-          if (!b?.id || !b?.storagePath) continue;
-          await setDoc(doc(db, 'users', user.uid, 'customBooks', b.id), {
-            name: b.name ?? b.id,
-            storagePath: b.storagePath,
-            sizeBytes: b.sizeBytes ?? null,
-            mimeType: b.mimeType ?? null,
-            uploadedAt: serverTimestamp()
-          });
-        }
 
         router.replace(`/${locale}/home`);
       } catch (e) {
@@ -242,8 +234,8 @@ export default function OnboardingScreen() {
 
   const progress = useMemo(() => {
     const totalKeys = [
-      'preferredName', 'age', 'yearOfEducation', 'location', 'curriculum',
-      'favoriteSubjects', 'reason', 'goals', 'customBooks', 'avatarSeed'
+      'preferredName', 'age', 'country',
+      'yearOfEducation', 'interests', 'avatarSeed'
     ];
     const done = totalKeys.filter((k) => collected[k] !== undefined && collected[k] !== null).length;
     return { done, total: totalKeys.length };
@@ -295,7 +287,6 @@ export default function OnboardingScreen() {
               onAnswer={(answerText, answerValue) =>
                 sendTurn(answerText, answerValue, currentStep.key)
               }
-              user={user}
               locale={locale}
               isAR={isAR}
               busy={pending}
@@ -336,14 +327,12 @@ function Bubble({ role, text, isAR }: { role: 'agent' | 'user'; text: string; is
 function AnswerWidget({
   step,
   onAnswer,
-  user,
   locale,
   isAR,
   busy
 }: {
   step: NextStepQuestion;
   onAnswer: (text: string, value: unknown) => void;
-  user: { uid: string };
   locale: string;
   isAR: boolean;
   busy: boolean;
@@ -358,22 +347,7 @@ function AnswerWidget({
         <ChoiceRow
           options={step.options ?? []}
           locale={locale}
-          onPick={(opt) => onAnswer(isAR ? opt.ar : opt.en, opt.id)}
-          disabled={busy}
-        />
-      );
-    case 'multi_choice':
-      return (
-        <MultiChoiceRow
-          options={step.options ?? []}
-          locale={locale}
-          isAR={isAR}
-          onConfirm={(picked) =>
-            onAnswer(
-              picked.map((o) => (isAR ? o.ar : o.en)).join(', ') || (isAR ? '(تخطى)' : '(skip)'),
-              picked.map((o) => o.id)
-            )
-          }
+          onPick={(opt) => onAnswer(optionLabel(opt, isAR), opt.id)}
           disabled={busy}
         />
       );
@@ -385,22 +359,6 @@ function AnswerWidget({
             onAnswer(
               isAR ? 'اخترت شكلي ✨' : 'Picked an avatar ✨',
               { avatarStyle: style, avatarSeed: seed }
-            )
-          }
-          disabled={busy}
-        />
-      );
-    case 'upload':
-      return (
-        <UploadStep
-          uid={user.uid}
-          isAR={isAR}
-          onSubmit={(books) =>
-            onAnswer(
-              books.length
-                ? (isAR ? `رفعت ${books.length} ملف` : `Uploaded ${books.length} file(s)`)
-                : (isAR ? '(تخطى)' : '(skip)'),
-              books
             )
           }
           disabled={busy}
@@ -483,9 +441,9 @@ function ChoiceRow({
   onPick,
   disabled
 }: {
-  options: { id: string; ar: string; en: string }[];
+  options: ChoiceOption[];
   locale: string;
-  onPick: (opt: { id: string; ar: string; en: string }) => void;
+  onPick: (opt: ChoiceOption) => void;
   disabled: boolean;
 }) {
   const isAR = locale === 'ar';
@@ -498,61 +456,9 @@ function ChoiceRow({
           disabled={disabled}
           className="rounded-lg border-2 border-slate-200 bg-white hover:border-sky-500 hover:bg-sky-50 text-slate-800 text-[13.5px] font-semibold px-3.5 py-2 transition disabled:opacity-50"
         >
-          {isAR ? opt.ar : opt.en}
+          {optionLabel(opt, isAR)}
         </button>
       ))}
-    </div>
-  );
-}
-
-function MultiChoiceRow({
-  options,
-  locale,
-  isAR,
-  onConfirm,
-  disabled
-}: {
-  options: { id: string; ar: string; en: string }[];
-  locale: string;
-  isAR: boolean;
-  onConfirm: (picked: { id: string; ar: string; en: string }[]) => void;
-  disabled: boolean;
-}) {
-  const [picked, setPicked] = useState<Set<string>>(new Set());
-  const toggle = (id: string) => {
-    setPicked((p) => {
-      const n = new Set(p);
-      n.has(id) ? n.delete(id) : n.add(id);
-      return n;
-    });
-  };
-  return (
-    <div>
-      <div className="flex flex-wrap gap-2 mb-3">
-        {options.map((opt) => {
-          const on = picked.has(opt.id);
-          return (
-            <button
-              key={opt.id}
-              onClick={() => toggle(opt.id)}
-              disabled={disabled}
-              className={`rounded-lg border-2 px-3 py-1.5 text-[13px] font-semibold transition disabled:opacity-50
-                ${on
-                  ? 'border-sky-500 bg-sky-50 text-sky-700'
-                  : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'}`}
-            >
-              {locale === 'ar' ? opt.ar : opt.en}
-            </button>
-          );
-        })}
-      </div>
-      <Btn
-        kind="primary"
-        onClick={() => onConfirm(options.filter((o) => picked.has(o.id)))}
-        disabled={disabled}
-      >
-        {isAR ? 'تمام →' : 'Continue →'}
-      </Btn>
     </div>
   );
 }
@@ -611,110 +517,3 @@ function AvatarPicker({
   );
 }
 
-function UploadStep({
-  uid: userId,
-  isAR,
-  onSubmit,
-  disabled
-}: {
-  uid: string;
-  isAR: boolean;
-  onSubmit: (books: CustomBook[]) => void;
-  disabled: boolean;
-}) {
-  const [books, setBooks] = useState<CustomBook[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-
-  const handlePick = async (files: FileList | null) => {
-    if (!files || !files.length) return;
-    setUploading(true);
-    setErr(null);
-    try {
-      const { storage } = getFirebase();
-      const out: CustomBook[] = [];
-      for (const f of Array.from(files)) {
-        const id = `${Date.now()}-${uid()}`;
-        const path = `users/${userId}/uploads/onboarding/${id}-${f.name}`;
-        const r = storageRef(storage, path);
-        await uploadBytes(r, f, { contentType: f.type || 'application/octet-stream' });
-        out.push({
-          id,
-          name: f.name,
-          storagePath: path,
-          sizeBytes: f.size,
-          mimeType: f.type || undefined
-        });
-      }
-      setBooks((prev) => [...prev, ...out]);
-    } catch (e) {
-      setErr((e as Error).message || 'upload failed');
-    } finally {
-      setUploading(false);
-      if (inputRef.current) inputRef.current.value = '';
-    }
-  };
-
-  return (
-    <div>
-      <div
-        className="border-2 border-dashed border-slate-300 rounded-xl bg-white px-6 py-6 text-center hover:border-sky-400 hover:bg-sky-50/40 transition cursor-pointer"
-        onClick={() => inputRef.current?.click()}
-      >
-        <div className="text-3xl mb-1">📎</div>
-        <div className="font-bold text-slate-900 text-[14px]">
-          {isAR ? 'اضغط لرفع كتب أو ملازم' : 'Click to upload books or notes'}
-        </div>
-        <div className="text-[12px] text-slate-500 mt-1">
-          {isAR ? 'PDF، صور أو مستندات. اختياري.' : 'PDF, images, or documents. Optional.'}
-        </div>
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          className="hidden"
-          accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx"
-          onChange={(e) => handlePick(e.target.files)}
-          disabled={disabled || uploading}
-        />
-      </div>
-
-      {uploading && (
-        <div className="text-[12.5px] text-slate-500 mt-2">{isAR ? 'بنرفع…' : 'Uploading…'}</div>
-      )}
-      {err && (
-        <div className="text-[12.5px] text-rose-600 mt-2">{err}</div>
-      )}
-
-      {books.length > 0 && (
-        <ul className="mt-3 space-y-1.5">
-          {books.map((b) => (
-            <li
-              key={b.id}
-              className="flex items-center gap-2 text-[12.5px] text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5"
-            >
-              <span>📄</span>
-              <span className="truncate flex-1">{b.name}</span>
-              <button
-                onClick={() => setBooks((bs) => bs.filter((x) => x.id !== b.id))}
-                className="text-slate-400 hover:text-rose-500"
-                aria-label="remove"
-              >
-                ✕
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div className="flex items-center gap-2 mt-4">
-        <Btn kind="primary" onClick={() => onSubmit(books)} disabled={disabled || uploading}>
-          {books.length
-            ? (isAR ? 'تمام، كمل →' : 'Done, continue →')
-            : (isAR ? 'تخطى →' : 'Skip →')}
-        </Btn>
-      </div>
-    </div>
-  );
-}
