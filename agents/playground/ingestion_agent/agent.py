@@ -81,6 +81,46 @@ async def download_pdf(url: str) -> bytes:
         res.raise_for_status()
         return res.content
 
+def filter_status_maps(tasks_map: dict, books_list: dict) -> tuple[dict, dict]:
+    """Filter tasks and booksList maps to avoid Firestore 1MB document size limits.
+    
+    We only keep:
+      - 'crawler' and 'video_extractor' tasks
+      - Any task that is currently 'running' or 'failed'
+      - The most recent completed tasks, capped to a small number (e.g. 10)
+      - We exclude 'queued' tasks entirely from the written document.
+    """
+    filtered_tasks = {}
+    filtered_books = {}
+    
+    # 1. Always keep crawler and video_extractor
+    for key in ["crawler", "video_extractor"]:
+        if key in tasks_map:
+            filtered_tasks[key] = tasks_map[key]
+            
+    # 2. Find active, failed, and completed book tasks
+    active_keys = []
+    completed_keys = []
+    
+    for key, task in tasks_map.items():
+        if key in ["crawler", "video_extractor"]:
+            continue
+        if task.get("status") in ["running", "failed"]:
+            active_keys.append(key)
+        elif task.get("status") == "completed":
+            completed_keys.append(key)
+            
+    # 3. Take all active keys, plus the last 10 completed ones
+    show_keys = active_keys + completed_keys[-10:]
+    
+    for key in show_keys:
+        filtered_tasks[key] = tasks_map[key]
+        b_id = key.replace("book_", "")
+        if b_id in books_list:
+            filtered_books[b_id] = books_list[b_id]
+            
+    return filtered_tasks, filtered_books
+
 async def run_sync_pipeline(
     db: firestore.Client,
     storage_client: storage.Client,
@@ -215,17 +255,18 @@ async def run_sync_pipeline(
         completed_tasks = len([t for t in tasks_map.values() if t["status"] == "completed"])
         progress_percentage = int((completed_tasks / total_tasks) * 100)
 
+        filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
         status_ref.update({
             "totalTasks": total_tasks,
             "completedTasks": completed_tasks,
             "progressPercentage": progress_percentage,
-            "tasks": tasks_map,
+            "tasks": filtered_tasks,
             # Legacy compatibility:
             "totalBooks": total_books,
             "downloadedBooks": len([b for b in legacy_books_list.values() if b.get("status") == "completed"]),
             "parsedBooks": len([b for b in legacy_books_list.values() if b.get("status") == "completed"]),
             "percentage": float(progress_percentage),
-            "booksList": legacy_books_list,
+            "booksList": filtered_books,
             "logs": logs
         })
 
@@ -259,12 +300,13 @@ async def run_sync_pipeline(
             
             append_log(f"Processing book {book_idx+1}/{total_books}: {b_title} ({grade})", "info")
             
+            filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
             status_ref.update({
                 "activeBookId": b_id,
                 "activeBookTitle": b_title,
                 "progressMessage": f"Downloading {b_title}...",
-                f"tasks.{task_key}": tasks_map[task_key],
-                f"booksList.{b_id}": legacy_books_list[b_id],
+                "tasks": filtered_tasks,
+                "booksList": filtered_books,
                 "logs": logs,
                 "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
             })
@@ -281,10 +323,11 @@ async def run_sync_pipeline(
                 tasks_map[task_key]["progress"] = 30
                 legacy_books_list[b_id]["status"] = "counting"
                 legacy_books_list[b_id]["progress"] = 30
+                filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
                 status_ref.update({
                     "progressMessage": f"Analyzing pages & chapters for {b_title}...",
-                    f"tasks.{task_key}": tasks_map[task_key],
-                    f"booksList.{b_id}": legacy_books_list[b_id],
+                    "tasks": filtered_tasks,
+                    "booksList": filtered_books,
                     "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
                 })
 
@@ -301,10 +344,11 @@ async def run_sync_pipeline(
                 tasks_map[task_key]["progress"] = 40
                 legacy_books_list[b_id]["status"] = "uploading"
                 legacy_books_list[b_id]["progress"] = 40
+                filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
                 status_ref.update({
                     "progressMessage": f"Uploading original PDF: {b_title}...",
-                    f"tasks.{task_key}": tasks_map[task_key],
-                    f"booksList.{b_id}": legacy_books_list[b_id],
+                    "tasks": filtered_tasks,
+                    "booksList": filtered_books,
                     "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
                 })
 
@@ -331,10 +375,11 @@ async def run_sync_pipeline(
                 tasks_map[task_key]["progress"] = 50
                 legacy_books_list[b_id]["status"] = "parsing"
                 legacy_books_list[b_id]["progress"] = 50
+                filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
                 status_ref.update({
                     "progressMessage": f"Formatting {total_pages} pages for {b_title}...",
-                    f"tasks.{task_key}": tasks_map[task_key],
-                    f"booksList.{b_id}": legacy_books_list[b_id],
+                    "tasks": filtered_tasks,
+                    "booksList": filtered_books,
                     "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
                 })
 
@@ -367,10 +412,11 @@ async def run_sync_pipeline(
                 tasks_map[task_key]["progress"] = 80
                 legacy_books_list[b_id]["status"] = "indexing"
                 legacy_books_list[b_id]["progress"] = 80
+                filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
                 status_ref.update({
                     "progressMessage": f"Indexing full document and generating search embeddings...",
-                    f"tasks.{task_key}": tasks_map[task_key],
-                    f"booksList.{b_id}": legacy_books_list[b_id],
+                    "tasks": filtered_tasks,
+                    "booksList": filtered_books,
                     "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
                 })
 
@@ -416,6 +462,7 @@ async def run_sync_pipeline(
                 progress_percentage = int((completed_count / total_tasks) * 100)
                 total_pages_processed = curr_status.get("totalPagesProcessed", 0) + total_pages
 
+                filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
                 status_ref.update({
                     "completedTasks": completed_count,
                     "progressPercentage": progress_percentage,
@@ -423,8 +470,8 @@ async def run_sync_pipeline(
                     "parsedBooks": len([b for b in legacy_books_list.values() if b.get("status") == "completed"]),
                     "totalPagesProcessed": total_pages_processed,
                     "percentage": float(progress_percentage),
-                    f"tasks.{task_key}": tasks_map[task_key],
-                    f"booksList.{b_id}": legacy_books_list[b_id],
+                    "tasks": filtered_tasks,
+                    "booksList": filtered_books,
                     "logs": logs,
                     "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
                 })
@@ -437,9 +484,10 @@ async def run_sync_pipeline(
                 legacy_books_list[b_id]["status"] = "failed"
                 legacy_books_list[b_id]["progress"] = 0
                 
+                filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
                 status_ref.update({
-                    f"tasks.{task_key}": tasks_map[task_key],
-                    f"booksList.{b_id}": legacy_books_list[b_id],
+                    "tasks": filtered_tasks,
+                    "booksList": filtered_books,
                     "logs": logs,
                     "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
                 })
