@@ -68,7 +68,6 @@ export type Book = {
   updatedAtMs?: number;
 };
 
-
 export type SubjectProgress = {
   subject: SubjectId;
   mastery: number;
@@ -151,6 +150,13 @@ export type IngestedBookDetail = {
   govUrl: string;
 };
 
+export type IngestedTaskDetail = {
+  name: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  progress: number;
+  errorMessage?: string;
+};
+
 export type IngestionStatus = {
   status: 'idle' | 'running' | 'paused' | 'completed' | 'error';
   pausedByRequest: boolean;
@@ -169,8 +175,24 @@ export type IngestionStatus = {
   activeBookId?: string;
   activeBookTitle?: string;
   booksList?: Record<string, IngestedBookDetail>;
+  totalTasks?: number;
+  completedTasks?: number;
+  progressPercentage?: number;
+  tasks?: Record<string, IngestedTaskDetail>;
   executionName?: string;
   lastHeartbeatAt?: { toMillis(): number } | null;
   errorMessage?: string;
+};
+
+export type Video = {
+  id: string;
+  title: string;
+  stage: string;
+  grade: string;
+  subject: SubjectId;
+  term: string;
+  youtubeUrl: string;
+  sourceUrl: string;
+  createdAtMs?: number;
 };
 

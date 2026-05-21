@@ -112,7 +112,7 @@ export function bookMatchesQuery(book: Book, query: string): boolean {
   ).includes(q);
 }
 
-function normalizeSubject(raw: string): SubjectId {
+export function normalizeSubject(raw: string): SubjectId {
   const lowered = normalize(raw);
   if ((Object.keys(SUBJECT_META) as SubjectId[]).includes(raw as SubjectId)) {
     return raw as SubjectId;

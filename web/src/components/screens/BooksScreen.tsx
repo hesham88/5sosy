@@ -1,18 +1,18 @@
 'use client';
 
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { collection, doc, onSnapshot } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { getFirebase } from '@/lib/firebase/client';
 import { useAuth } from '@/lib/firebase/auth-context';
-import { bookFromFirestore, bookMatchesQuery, compareBooks } from '@/lib/books';
+import { bookFromFirestore, bookMatchesQuery, compareBooks, normalizeSubject } from '@/lib/books';
 import { ChromeLayout } from '../shared/Chrome';
 import { useApp } from '../shared/Providers';
 import { AgentLog, Btn, Card, Ring, SubjectChip, type AgentLogLine } from '../shared/atoms';
 import { SUBJECT_META, HUE, type HueId } from '@/constants/subjects';
 import { callAgent, type AgentName } from '@/lib/agents';
-import type { Book, SubjectId, IngestionStatus } from '@/lib/types';
+import type { Book, SubjectId, IngestionStatus, Video } from '@/lib/types';
 
 type ActionKey = 'chat' | 'summarize' | 'explain' | 'audio' | 'quiz' | 'questions';
 
@@ -34,8 +34,10 @@ export default function BooksScreen() {
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [subjectFilter, setSubjectFilter] = useState<SubjectId | 'all'>(subjectFromUrl ?? 'all');
-  const [activeTab, setActiveTab] = useState<'all' | 'official' | 'added'>('all');
+  const [activeTab, setActiveTab] = useState<'official' | 'added' | 'videos'>('official');
   const [gradeFilter, setGradeFilter] = useState<string | 'all'>('all');
+  const [stageFilter, setStageFilter] = useState<'all' | 'primary' | 'preparatory' | 'secondary'>('all');
+  const [typeFilter, setTypeFilter] = useState<string | 'all'>('all');
   const [catalogQuery, setCatalogQuery] = useState('');
 
   const [chatInput, setChatInput] = useState('');
@@ -47,15 +49,23 @@ export default function BooksScreen() {
 
   const [syncStatus, setSyncStatus] = useState<IngestionStatus | null>(null);
   const [dbBooks, setDbBooks] = useState<Book[]>([]);
+  const [dbVideos, setDbVideos] = useState<Video[]>([]);
   const [booksLoading, setBooksLoading] = useState(true);
+  const [videosLoading, setVideosLoading] = useState(true);
   const [syncStarting, setSyncStarting] = useState(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
+
+  // Video selected for modal player
+  const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
+
+  // Mobile filters drawer
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
 
   // Upload state
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -119,13 +129,48 @@ export default function BooksScreen() {
         }
       );
 
+      const videosCol = collection(db, 'videos');
+      const unsubVideos = onSnapshot(
+        videosCol,
+        (snapshot) => {
+          const list: Video[] = [];
+          snapshot.forEach((d) => {
+            try {
+              const data = d.data();
+              list.push({
+                id: d.id,
+                title: data.title || '',
+                stage: data.stage || '',
+                grade: data.grade || '',
+                subject: normalizeSubject(data.subject || ''),
+                term: data.term || '',
+                youtubeUrl: data.youtubeUrl || '',
+                sourceUrl: data.sourceUrl || '',
+              });
+            } catch (err) {
+              console.warn('[videos listener] skipped malformed doc', d.id, err);
+            }
+          });
+          list.sort((a, b) => a.title.localeCompare(b.title));
+          console.info(`[videos listener] received ${snapshot.size} docs`);
+          setDbVideos(list);
+          setVideosLoading(false);
+        },
+        (err) => {
+          console.error('videos listener failed:', err);
+          setVideosLoading(false);
+        }
+      );
+
       return () => {
         unsubStatus();
         unsubBooks();
+        unsubVideos();
       };
     } catch (e) {
       console.error('Firebase snapshot initialization error:', e);
       setBooksLoading(false);
+      setVideosLoading(false);
     }
   }, []);
 
@@ -150,13 +195,11 @@ export default function BooksScreen() {
     } catch (err) {
       console.error('Error triggering sync command:', err);
     } finally {
-      // Keep the "starting" pill up briefly so the user sees feedback even if
-      // the eager-seed Firestore write arrives within ~100ms.
       if (command === 'start') setTimeout(() => setSyncStarting(false), 1500);
     }
   };
 
-  // Liveness staleness — true when the Job has stopped heartbeating for >90s.
+  // Liveness staleness
   const heartbeatMs = (() => {
     const v = syncStatus?.lastHeartbeatAt as { toMillis?: () => number } | undefined | null;
     return v && typeof v.toMillis === 'function' ? v.toMillis() : 0;
@@ -175,7 +218,7 @@ export default function BooksScreen() {
   const officialBooks = useMemo(() => dbBooks.filter(b => b.type !== 'Added Book'), [dbBooks]);
   const addedBooks = useMemo(() => dbBooks.filter(b => b.type === 'Added Book'), [dbBooks]);
 
-  const activeBooks = activeTab === 'official' ? officialBooks : activeTab === 'added' ? addedBooks : dbBooks;
+  const activeBooks = activeTab === 'official' ? officialBooks : addedBooks;
   const indexedCount = useMemo(() => dbBooks.filter((b) => b.status === 'indexed').length, [dbBooks]);
   const processingCount = useMemo(
     () => dbBooks.filter((b) => b.status !== 'indexed' && b.status !== 'error').length,
@@ -183,29 +226,81 @@ export default function BooksScreen() {
   );
   const totalPages = useMemo(() => dbBooks.reduce((sum, b) => sum + (b.pages || 0), 0), [dbBooks]);
 
-  // Grades list for selector
+  // Dynamic matching helper for Stage
+  const matchesStage = useCallback((bookStage?: string) => {
+    if (stageFilter === 'all') return true;
+    if (!bookStage) return false;
+    const s = bookStage.toLowerCase();
+    if (stageFilter === 'primary') return s.includes('primary') || s.includes('ابتدائي');
+    if (stageFilter === 'preparatory') return s.includes('preparatory') || s.includes('إعدادي') || s.includes('اعدادي');
+    if (stageFilter === 'secondary') return s.includes('secondary') || s.includes('ثانوي');
+    return false;
+  }, [stageFilter]);
+
+  // Grades list for active filter
   const availableGrades = useMemo(() => {
     const grades = new Set<string>();
-    dbBooks.forEach(b => {
-      if (b.grade) {
-        grades.add(b.grade);
-        return;
-      }
-      const match = b.arSub.match(/G\d+/i) || b.enSub.match(/G\d+/i) || b.arSub.match(/الصف\s+(\S+)/);
-      if (match) grades.add(match[0].trim());
-    });
+    if (activeTab === 'videos') {
+      dbVideos.forEach(v => {
+        if (v.grade) grades.add(v.grade);
+      });
+    } else {
+      activeBooks.forEach(b => {
+        if (b.grade) {
+          grades.add(b.grade);
+          return;
+        }
+        const match = b.arSub.match(/G\d+/i) || b.enSub.match(/G\d+/i) || b.arSub.match(/الصف\s+(\S+)/);
+        if (match) grades.add(match[0].trim());
+      });
+    }
     return Array.from(grades).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
-  }, [dbBooks]);
+  }, [activeBooks, dbVideos, activeTab]);
 
-  const filtered = useMemo(() => activeBooks.filter((b) => {
-    const matchSubject = subjectFilter === 'all' || b.subject === subjectFilter;
-    const matchGrade =
-      gradeFilter === 'all' ||
-      b.grade === gradeFilter ||
-      b.arSub.toLowerCase().includes(gradeFilter.toLowerCase()) ||
-      b.enSub.toLowerCase().includes(gradeFilter.toLowerCase());
-    return matchSubject && matchGrade && bookMatchesQuery(b, catalogQuery);
-  }), [activeBooks, subjectFilter, gradeFilter, catalogQuery]);
+  // Book types list for official catalog
+  const availableTypes = useMemo(() => {
+    const types = new Set<string>();
+    officialBooks.forEach(b => {
+      if (b.type) types.add(b.type);
+    });
+    return Array.from(types).sort();
+  }, [officialBooks]);
+
+  // Filters Books list
+  const filtered = useMemo(() => {
+    if (activeTab === 'videos') return [];
+    return activeBooks.filter((b) => {
+      const matchSubject = subjectFilter === 'all' || b.subject === subjectFilter;
+      const matchGrade =
+        gradeFilter === 'all' ||
+        b.grade === gradeFilter ||
+        b.arSub.toLowerCase().includes(gradeFilter.toLowerCase()) ||
+        b.enSub.toLowerCase().includes(gradeFilter.toLowerCase());
+      const matchStage = matchesStage(b.stage);
+      const matchType = typeFilter === 'all' || b.type === typeFilter;
+      return matchSubject && matchGrade && matchStage && matchType && bookMatchesQuery(b, catalogQuery);
+    });
+  }, [activeBooks, subjectFilter, gradeFilter, matchesStage, typeFilter, catalogQuery, activeTab]);
+
+  // Filters Videos list
+  const filteredVideos = useMemo(() => {
+    if (activeTab !== 'videos') return [];
+    return dbVideos.filter((v) => {
+      const matchSubject = subjectFilter === 'all' || v.subject === subjectFilter;
+      const matchGrade = gradeFilter === 'all' || v.grade === gradeFilter;
+      const matchStage = matchesStage(v.stage);
+
+      const q = catalogQuery.trim().toLowerCase();
+      const matchQuery =
+        !q ||
+        v.title.toLowerCase().includes(q) ||
+        v.subject.toLowerCase().includes(q) ||
+        v.grade.toLowerCase().includes(q) ||
+        v.stage.toLowerCase().includes(q);
+
+      return matchSubject && matchGrade && matchStage && matchQuery;
+    });
+  }, [dbVideos, subjectFilter, gradeFilter, matchesStage, catalogQuery, activeTab]);
 
   const selectedBooks = useMemo(() => dbBooks.filter((b) => selected.has(b.id)), [dbBooks, selected]);
   const count = selectedBooks.length;
@@ -222,6 +317,14 @@ export default function BooksScreen() {
 
   const selectAllIndexed = () => setSelected(new Set(filtered.filter((b) => b.status === 'indexed').map((b) => b.id)));
   const clearAll = () => setSelected(new Set());
+
+  const clearAllFilters = () => {
+    setSubjectFilter('all');
+    setGradeFilter('all');
+    setStageFilter('all');
+    setTypeFilter('all');
+    setCatalogQuery('');
+  };
 
   const runAction = async (key: ActionKey) => {
     if (count === 0) return;
@@ -242,10 +345,10 @@ export default function BooksScreen() {
 
   const sendChat = async () => {
     if (!chatInput.trim() || count === 0) return;
-    const user = chatInput;
-    setChatMsgs((m) => [...m, { who: 'me', ar: user, en: user }]);
+    const msgVal = chatInput;
+    setChatMsgs((m) => [...m, { who: 'me', ar: msgVal, en: msgVal }]);
     setChatInput('');
-    void callAgent('orchestrator', { mode: 'chat', bookIds: [...selected], message: user, locale }).catch(() => undefined);
+    void callAgent('orchestrator', { mode: 'chat', bookIds: [...selected], message: msgVal, locale }).catch(() => undefined);
     setTimeout(() => {
       const titles = selectedBooks.map((b) => (isAR ? b.arT : b.enT)).join(' + ');
       setChatMsgs((m) => [...m, {
@@ -295,7 +398,7 @@ export default function BooksScreen() {
       setUploadFile(file);
       setNewBookMeta(prev => ({
         ...prev,
-        title: file.name.replace(/\.[^/.]+$/, "") // Strip extension
+        title: file.name.replace(/\.[^/.]+$/, "")
       }));
     }
   };
@@ -330,9 +433,6 @@ export default function BooksScreen() {
           setUploadProgress(null);
         },
         () => {
-          // Wrap the async completion logic so a thrown promise can't strand
-          // the UI at 100%. Without this, getDownloadURL or the fetch
-          // rejecting would leave uploadProgress=100 forever.
           (async () => {
             try {
               await getDownloadURL(uploadTask.snapshot.ref);
@@ -419,7 +519,8 @@ export default function BooksScreen() {
 
   return (
     <ChromeLayout>
-      <div className="px-5 lg:px-10 py-6 lg:py-8 max-w-[1500px] mx-auto">
+      <div className="px-4 lg:px-8 py-6 max-w-[1500px] mx-auto">
+        {/* Header Hero banner */}
         <div className="mb-6 rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
           <div className="p-5 lg:p-6 flex flex-col gap-5">
             <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -443,40 +544,23 @@ export default function BooksScreen() {
               <LibraryStat label={t.books.pages} value={totalPages} tone="sky" />
             </div>
 
-            <div className="grid grid-cols-1 xl:grid-cols-12 gap-3">
-              <label className="xl:col-span-5 min-w-0">
-                <span className="sr-only">{isAR ? 'بحث في المكتبة' : 'Search library catalog'}</span>
-                <div className="flex items-center gap-2 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2.5 focus-within:border-slate-400 transition">
-                  <span className="text-slate-400">⌕</span>
-                  <input
-                    type="text"
-                    value={catalogQuery}
-                    onChange={(e) => setCatalogQuery(e.target.value)}
-                    placeholder={isAR ? 'ابحث باسم الكتاب، الصف، الترم، المادة...' : 'Find by title, grade, term, subject...'}
-                    className="flex-1 bg-transparent border-none text-[13.5px] text-slate-800 focus:outline-none min-w-0"
-                  />
-                </div>
-              </label>
-
-              <div className="xl:col-span-7 min-w-0">
-                <div className="relative flex items-center rounded-xl bg-white border border-slate-200 p-1.5 focus-within:border-sky-500 focus-within:ring-2 focus-within:ring-sky-200/60 transition">
-                  <span className="text-lg px-2 text-slate-400">🔍</span>
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleVectorSearch()}
-                    placeholder={isAR ? 'ابحث داخل صفحات الكتب بالذكاء الاصطناعي...' : 'Semantic search inside book pages...'}
-                    className="flex-1 bg-transparent border-none text-[13.5px] text-slate-800 focus:outline-none py-1.5 min-w-0"
-                  />
-                  <button
-                    onClick={handleVectorSearch}
-                    className="bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-[12.5px] px-4 py-2 rounded-lg transition shadow-sm whitespace-nowrap"
-                  >
-                    {isAR ? 'بحث ذكي' : 'AI Search'}
-                  </button>
-                </div>
-              </div>
+            {/* Semantic AI Search bar at the top */}
+            <div className="relative flex items-center rounded-xl bg-white border border-slate-200 p-1.5 focus-within:border-sky-500 focus-within:ring-2 focus-within:ring-sky-200/60 transition">
+              <span className="text-lg px-2 text-slate-400">🔍</span>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleVectorSearch()}
+                placeholder={isAR ? 'ابحث داخل صفحات الكتب بالذكاء الاصطناعي...' : 'Semantic search inside book pages...'}
+                className="flex-1 bg-transparent border-none text-[13.5px] text-slate-800 focus:outline-none py-1.5 min-w-0"
+              />
+              <button
+                onClick={handleVectorSearch}
+                className="bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-[12.5px] px-4 py-2 rounded-lg transition shadow-sm whitespace-nowrap"
+              >
+                {isAR ? 'بحث ذكي' : 'AI Search'}
+              </button>
             </div>
           </div>
         </div>
@@ -557,7 +641,7 @@ export default function BooksScreen() {
               </div>
             </div>
 
-            {/* Execution metadata + Cloud Logging deep-link */}
+            {/* Execution info */}
             {(executionShortId || syncStatus?.status === 'running') && (
               <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500 mb-3 ltr">
                 {executionShortId && (
@@ -580,7 +664,7 @@ export default function BooksScreen() {
               </div>
             )}
 
-            {/* Liveness warning — Job hasn't heartbeated for >90s */}
+            {/* Heartbeat warning */}
             {syncIsStale && (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-[13px] text-amber-900 mb-4 flex items-start gap-2">
                 <span className="text-lg leading-none">⚠️</span>
@@ -597,7 +681,7 @@ export default function BooksScreen() {
               </div>
             )}
 
-            {/* Error banner — Job exited or failed to launch */}
+            {/* Error banner */}
             {syncStatus?.status === 'error' && syncStatus.errorMessage && (
               <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-[13px] text-rose-900 mb-4 flex items-start gap-2">
                 <span className="text-lg leading-none">❌</span>
@@ -619,365 +703,339 @@ export default function BooksScreen() {
               </div>
             )}
 
+            {/* Granular Task Status Dashboard */}
             {syncStatus && syncStatus.status !== 'idle' && (
               <div className="space-y-4">
-                {/* Progress & State */}
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
-                  <div className="md:col-span-3">
-                    <div className="flex items-center gap-2">
-                      <span className={`inline-block w-2.5 h-2.5 rounded-full ${
-                        syncStatus.status === 'running' ? 'bg-emerald-500 animate-pulse' :
-                        syncStatus.status === 'paused' ? 'bg-amber-500' :
-                        syncStatus.status === 'completed' ? 'bg-sky-500' : 'bg-rose-500'
-                      }`} />
-                      <span className="font-extrabold text-[13.5px] uppercase tracking-wider text-slate-700">
-                        {syncStatus.status === 'running' ? (isAR ? 'جاري المزامنة' : 'Syncing') :
-                         syncStatus.status === 'paused' ? (isAR ? 'موقوف مؤقتاً' : 'Paused') :
-                         syncStatus.status === 'completed' ? (isAR ? 'اكتمل بنجاح' : 'Completed') :
-                         (isAR ? 'خطأ' : 'Error')}
-                      </span>
-                    </div>
-                    <p className="text-[12px] text-slate-500 mt-1">
-                      {isAR ? `تم تحميل ${syncStatus.downloadedBooks} من أصل ${syncStatus.totalBooks}` : `Synced ${syncStatus.downloadedBooks} of ${syncStatus.totalBooks}`}
-                    </p>
+                {/* Agent Task Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <AgentTaskCard
+                    name={syncStatus.tasks?.crawler?.name || (isAR ? 'عامل زحف وفهرسة المناهج' : 'Crawler & Scraper Agent')}
+                    status={syncStatus.tasks?.crawler?.status || (syncStatus.status === 'running' ? 'running' : 'queued')}
+                    progress={syncStatus.tasks?.crawler?.progress || 0}
+                    errorMessage={syncStatus.tasks?.crawler?.errorMessage}
+                    icon="🕸️"
+                  />
+                  <AgentTaskCard
+                    name={syncStatus.tasks?.video_extractor?.name || (isAR ? 'عامل استخراج القنوات التعليمية' : 'Video Extractor Agent')}
+                    status={syncStatus.tasks?.video_extractor?.status || 'queued'}
+                    progress={syncStatus.tasks?.video_extractor?.progress || 0}
+                    errorMessage={syncStatus.tasks?.video_extractor?.errorMessage}
+                    icon="🎥"
+                  />
+                </div>
+
+                {/* Granular Textbook Ingestion checklist */}
+                <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                  <div className="px-5 py-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                    <h3 className="text-[13px] font-extrabold text-slate-800 uppercase tracking-wide">
+                      {isAR ? 'قائمة التحقق التفصيلية للكتب المكتشفة' : 'Textbook Ingestion Checklist'}
+                    </h3>
+                    <span className="text-[11px] font-bold text-sky-600 bg-sky-50 px-2.5 py-0.5 rounded-full">
+                      {syncStatus.completedTasks || 0} / {syncStatus.totalTasks || 0} {isAR ? 'مهام مكتملة' : 'Tasks Done'}
+                    </span>
                   </div>
-                  
-                  <div className="md:col-span-6">
-                    <div className="relative w-full h-3.5 bg-slate-200 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all duration-500 ${
-                          syncStatus.status === 'running' ? 'bg-sky-600' :
-                          syncStatus.status === 'paused' ? 'bg-amber-400' : 'bg-emerald-500'
-                        }`}
-                        style={{ width: `${syncStatus.percentage}%` }}
-                      />
-                    </div>
-                    <div className="flex justify-between items-center text-[11px] text-slate-400 mt-1">
-                      <span>{syncStatus.percentage}%</span>
-                      {syncStatus.activeBookTitle && (
-                        <span className="truncate max-w-[80%] font-semibold text-slate-600">
-                          {isAR ? 'جاري معالجة: ' : 'Active: '} {syncStatus.activeBookTitle}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  
-                  <div className="md:col-span-3 text-end text-[12px] space-y-1">
-                    <span className="font-bold text-slate-700 block">{syncStatus.percentage}%</span>
-                    {syncStatus.totalPagesProcessed && (
-                      <span className="text-[10.5px] text-sky-600 font-semibold block">
-                        {isAR ? `تمت معالجة ${syncStatus.totalPagesProcessed} صفحة` : `Processed ${syncStatus.totalPagesProcessed} pages`}
-                      </span>
+
+                  <div className="max-h-[260px] overflow-y-auto p-4 space-y-2 slim bg-white">
+                    {syncStatus.tasks && Object.entries(syncStatus.tasks)
+                      .filter(([k]) => k.startsWith('book_'))
+                      .map(([key, t]) => (
+                        <BookTaskRow key={key} task={t} />
+                      ))}
+
+                    {(!syncStatus.tasks || Object.keys(syncStatus.tasks).filter(k => k.startsWith('book_')).length === 0) && (
+                      <div className="text-center py-6 text-slate-400 italic text-[12px]">
+                        {isAR ? 'في انتظار الزاحف للبدء في اكتشاف المناهج...' : 'Waiting for Crawler to discover curriculum books...'}
+                      </div>
                     )}
                   </div>
                 </div>
 
-                {/* Progress Message Banner */}
-                {syncStatus.progressMessage && (
-                  <div className="bg-sky-50 border border-sky-100 rounded-xl p-3 text-[13px] font-semibold text-sky-800 flex items-center gap-2">
-                    <span className="animate-spin text-lg">⚙️</span>
-                    <span>{syncStatus.progressMessage}</span>
+                {/* Log terminal */}
+                <div className="bg-slate-900 rounded-xl p-3.5 text-white">
+                  <div className="text-[10px] text-slate-400 mb-2 uppercase font-mono tracking-wider border-b border-slate-800 pb-1.5">
+                    Console log output
+                  </div>
+                  <div className="max-h-[160px] overflow-y-auto font-mono text-[11.5px] space-y-1 slim">
+                    {syncStatus.logs && syncStatus.logs.map((log, idx) => {
+                      const statusColor = log.status === 'error' ? 'text-rose-400' :
+                                          log.status === 'warn' ? 'text-amber-400' :
+                                          log.status === 'ok' ? 'text-emerald-400' :
+                                          'text-sky-300';
+                      return (
+                        <div key={idx} className="flex gap-2">
+                          <span className="text-slate-500">[{log.timestamp ? log.timestamp.slice(11,19) : ''}]</span>
+                          <span className={statusColor}>&lt;{log.agent}&gt;</span>
+                          <span className="text-slate-200">{log.text}</span>
+                        </div>
+                      );
+                    })}
+                    {(!syncStatus.logs || syncStatus.logs.length === 0) && (
+                      <div className="text-slate-500 italic py-2">{isAR ? 'لا يوجد سجلات حتى الآن' : 'No logs generated yet.'}</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </Card>
+        )}
+
+        {/* Sidebar + Main Grid Container */}
+        <div className="flex flex-col lg:flex-row gap-6 mt-6 items-start">
+          {/* Desktop Sidebar Filters */}
+          <aside className="hidden lg:block w-72 shrink-0 bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-6">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h3 className="font-extrabold text-slate-900 text-[14px]">
+                {isAR ? 'تصفية المحتوى' : 'Filter Catalog'}
+              </h3>
+              <button
+                onClick={clearAllFilters}
+                className="text-[11.5px] font-bold text-slate-400 hover:text-sky-600 transition"
+              >
+                {isAR ? 'إعادة ضبط' : 'Reset'}
+              </button>
+            </div>
+            
+            <FilterContent
+              isAR={isAR}
+              t={t}
+              subjectFilter={subjectFilter}
+              setSubjectFilter={setSubjectFilter}
+              gradeFilter={gradeFilter}
+              setGradeFilter={setGradeFilter}
+              stageFilter={stageFilter}
+              setStageFilter={setStageFilter}
+              typeFilter={typeFilter}
+              setTypeFilter={setTypeFilter}
+              catalogQuery={catalogQuery}
+              setCatalogQuery={setCatalogQuery}
+              availableGrades={availableGrades}
+              availableTypes={availableTypes}
+              activeTab={activeTab}
+            />
+          </aside>
+
+          {/* Main Area */}
+          <div className="flex-1 min-w-0 w-full space-y-6">
+            
+            {/* Header controls, Mobile Filter and stats */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                {/* Mobile filters button */}
+                <button
+                  onClick={() => setShowMobileFilters(true)}
+                  className="lg:hidden bg-white border border-slate-200 text-slate-700 font-bold text-[12.5px] px-3.5 py-2.5 rounded-xl shadow-sm hover:border-slate-300 transition flex items-center gap-1.5"
+                >
+                  <span>⚙️</span> {isAR ? 'تصفية' : 'Filters'}
+                  {(subjectFilter !== 'all' || gradeFilter !== 'all' || stageFilter !== 'all' || typeFilter !== 'all' || catalogQuery) && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
+                  )}
+                </button>
+
+                {/* Tabs selector */}
+                <div className="inline-flex rounded-xl bg-slate-100 border border-slate-200 p-1 overflow-x-auto slim">
+                  <CatalogTab
+                    active={activeTab === 'official'}
+                    onClick={() => { setActiveTab('official'); setGradeFilter('all'); }}
+                    label={isAR ? 'كتب الوزارة' : 'Ministry Books'}
+                    count={officialBooks.length}
+                  />
+                  <CatalogTab
+                    active={activeTab === 'added'}
+                    onClick={() => { setActiveTab('added'); setGradeFilter('all'); }}
+                    label={isAR ? 'تحميلات الطلاب' : 'User Uploads'}
+                    count={addedBooks.length}
+                  />
+                  <CatalogTab
+                    active={activeTab === 'videos'}
+                    onClick={() => { setActiveTab('videos'); setGradeFilter('all'); }}
+                    label={isAR ? 'الشروحات والملخصات' : 'Videos'}
+                    count={dbVideos.length}
+                  />
+                </div>
+              </div>
+
+              {/* Status and count */}
+              <div className="flex items-center gap-2 text-[12px] justify-end">
+                <span className="text-slate-500">
+                  {activeTab === 'videos' ? filteredVideos.length : filtered.length} {isAR ? 'نتيجة' : 'results'}
+                </span>
+                {activeTab !== 'videos' && (
+                  <>
+                    {count > 0 ? (
+                      <>
+                        <span className="font-bold text-sky-700">
+                          {count} {count === 1 ? t.books.selected : t.books.selectedPlural}
+                        </span>
+                        <button onClick={clearAll} className="text-slate-500 hover:text-rose-600 font-semibold">
+                          {t.books.clear}
+                        </button>
+                      </>
+                    ) : (
+                      <button onClick={selectAllIndexed} className="text-slate-500 hover:text-sky-700 font-semibold">
+                        {t.books.selectAll}
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Grid display */}
+            {activeTab === 'videos' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
+                {filteredVideos.map((v) => (
+                  <VideoCard key={v.id} video={v} onClick={() => setSelectedVideo(v)} />
+                ))}
+
+                {filteredVideos.length === 0 && (
+                  <Card className="p-8 text-center text-slate-500 w-full col-span-full">
+                    {videosLoading
+                      ? (isAR ? 'جاري تحميل الفيديوهات...' : 'Loading educational videos…')
+                      : (isAR ? 'لا توجد فيديوهات مطابقة للخيارات المحددة.' : 'No videos match the selected filters.')}
+                  </Card>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
+                {activeTab === 'added' && (
+                  <div className="rounded-2xl border-2 border-dashed border-slate-200 p-6 flex flex-col items-center justify-center text-center bg-slate-50/50 hover:bg-slate-50 transition duration-300">
+                    <input
+                      type="file"
+                      accept="application/pdf"
+                      ref={fileInputRef}
+                      onChange={handleFileChange}
+                      className="hidden"
+                    />
+                    {!uploadFile ? (
+                      <div className="flex flex-col items-center">
+                        <span className="text-4xl mb-2">📁</span>
+                        <h3 className="font-extrabold text-[14.5px] text-slate-800">{isAR ? 'أضف كتاب دراسي جديد' : 'Upload custom textbook'}</h3>
+                        <p className="text-[12px] text-slate-500 mt-1 max-w-[200px]">
+                          {isAR ? 'اسحب ملف PDF أو اضغط للتصفح' : 'Upload custom school textbook to parse'}
+                        </p>
+                        <button
+                          onClick={() => fileInputRef.current?.click()}
+                          className="mt-4 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-[12px] px-4 py-2 rounded-xl transition shadow-sm"
+                        >
+                          {isAR ? 'تصفح الملفات' : 'Choose File'}
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="w-full text-start space-y-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">📄</span>
+                          <span className="font-semibold text-[13px] text-slate-700 truncate flex-1">{uploadFile.name}</span>
+                        </div>
+                        
+                        {uploadProgress === null ? (
+                          <div className="space-y-2">
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-500 mb-1">{isAR ? 'العنوان:' : 'Title:'}</label>
+                              <input
+                                type="text"
+                                value={newBookMeta.title}
+                                onChange={(e) => setNewBookMeta(prev => ({ ...prev, title: e.target.value }))}
+                                className="w-full text-[12px] border border-slate-200 rounded-lg p-2 focus:outline-none focus:border-sky-500"
+                              />
+                            </div>
+                            
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="block text-[11px] font-bold text-slate-500 mb-1">{isAR ? 'المادة:' : 'Subject:'}</label>
+                                <select
+                                  value={newBookMeta.subject}
+                                  onChange={(e) => setNewBookMeta(prev => ({ ...prev, subject: e.target.value as SubjectId }))}
+                                  className="w-full text-[12px] border border-slate-200 rounded-lg p-2 focus:outline-none"
+                                >
+                                  {Object.keys(SUBJECT_META).map(s => (
+                                    <option key={s} value={s}>{isAR ? SUBJECT_META[s as SubjectId].ar : SUBJECT_META[s as SubjectId].en}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-bold text-slate-500 mb-1">{isAR ? 'الصف:' : 'Grade:'}</label>
+                                <select
+                                  value={newBookMeta.grade}
+                                  onChange={(e) => setNewBookMeta(prev => ({ ...prev, grade: e.target.value }))}
+                                  className="w-full text-[12px] border border-slate-200 rounded-lg p-2 focus:outline-none"
+                                >
+                                  <option value="G10">Grade 10</option>
+                                  <option value="G11">Grade 11</option>
+                                  <option value="G12">Grade 12</option>
+                                </select>
+                              </div>
+                            </div>
+
+                            <div className="flex gap-2 pt-2 justify-end">
+                              <button
+                                onClick={() => setUploadFile(null)}
+                                className="text-[12px] font-bold text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 transition"
+                              >
+                                {isAR ? 'إلغاء' : 'Cancel'}
+                              </button>
+                              <button
+                                onClick={handleUploadAndParse}
+                                className="bg-sky-600 hover:bg-sky-700 text-white text-[12px] font-bold px-4 py-1.5 rounded-lg transition"
+                              >
+                                {isAR ? 'رفع ومعالجة' : 'Upload & Parse'}
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                              <div className="bg-sky-600 h-full transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
+                            </div>
+                            <div className="flex justify-between text-[11px] text-slate-500">
+                              <span>{isAR ? 'جاري الرفع للذكاء الاصطناعي...' : 'Uploading to AI storage...'}</span>
+                              <span>{uploadProgress}%</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {uploadError && (
+                          <div className="text-[11px] text-rose-600 bg-rose-50 p-2 rounded-lg mt-2">
+                            ⚠️ {uploadError}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
-                {/* Real-time Logs Terminal & Queue */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-                  {/* Terminal logs */}
-                  <div className="lg:col-span-7 bg-slate-900 rounded-xl p-3.5 text-white">
-                    <div className="text-[10px] text-slate-400 mb-2 uppercase font-mono tracking-wider border-b border-slate-800 pb-1.5">
-                      Console log output
-                    </div>
-                    <div className="max-h-[160px] overflow-y-auto font-mono text-[11.5px] space-y-1 slim">
-                      {syncStatus.logs && syncStatus.logs.map((log, idx) => {
-                        const statusColor = log.status === 'error' ? 'text-rose-400' :
-                                            log.status === 'warn' ? 'text-amber-400' :
-                                            log.status === 'ok' ? 'text-emerald-400' :
-                                            'text-sky-300';
-                        return (
-                          <div key={idx} className="flex gap-2">
-                            <span className="text-slate-500">[{log.timestamp ? log.timestamp.slice(11,19) : ''}]</span>
-                            <span className={statusColor}>&lt;{log.agent}&gt;</span>
-                            <span className="text-slate-200">{log.text}</span>
-                          </div>
-                        );
-                      })}
-                      {(!syncStatus.logs || syncStatus.logs.length === 0) && (
-                        <div className="text-slate-500 italic py-2">{isAR ? 'لا يوجد سجلات حتى الآن' : 'No logs generated yet.'}</div>
-                      )}
-                    </div>
+                {filtered.map((b) => (
+                  <div key={b.id} className="relative group">
+                    <BookCard
+                      book={b}
+                      selected={selected.has(b.id)}
+                      onToggle={() => toggle(b.id, b.status)}
+                      onViewDetails={() => router.push(`/${locale}/books/${b.id}`)}
+                    />
+                    {activeTab === 'added' && (
+                      <button
+                        onClick={() => handleDeleteBook(b.id)}
+                        className="absolute top-2 start-2 z-10 w-7 h-7 rounded-full bg-rose-50 border border-rose-200 text-rose-600 hover:bg-rose-500 hover:text-white transition grid place-items-center opacity-0 group-hover:opacity-100 shadow-sm"
+                        title={isAR ? 'حذف هذا الكتاب' : 'Delete this book'}
+                      >
+                        ✕
+                      </button>
+                    )}
                   </div>
-                  
-                  {/* Queue panel */}
-                  <div className="lg:col-span-5 bg-white border border-slate-100 rounded-xl p-3">
-                    <div className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider mb-2">
-                      {isAR ? 'تتبع قائمة المزامنة' : 'Sync Activity Feed'}
-                    </div>
-                    <div className="max-h-[160px] overflow-y-auto space-y-1.5 slim">
-                      {syncStatus.booksList && Object.values(syncStatus.booksList).slice(0, 10).map((b: any) => {
-                        const badgeCls = b.status === 'completed' ? 'bg-emerald-50 text-emerald-700' :
-                                         b.status === 'failed' ? 'bg-rose-50 text-rose-700' :
-                                         b.status === 'downloading' || b.status === 'parsing' ? 'bg-sky-50 text-sky-700 animate-pulse' :
-                                         'bg-slate-50 text-slate-600';
-                        return (
-                          <div key={b.id} className="flex items-center justify-between text-[11px] border-b border-slate-50 pb-1.5">
-                            <span className="font-semibold text-slate-700 truncate max-w-[65%]" title={b.title}>
-                              {b.title} ({b.grade})
-                            </span>
-                            <span className={`px-2 py-0.5 rounded text-[9.5px] font-bold ${badgeCls}`}>
-                              {b.status}
-                            </span>
-                          </div>
-                        );
-                      })}
-                      {(!syncStatus.booksList || Object.keys(syncStatus.booksList).length === 0) && (
-                        <div className="text-slate-400 italic text-[11px] py-4 text-center">
-                          {isAR ? 'جاري تجهيز قائمة الكتب...' : 'Preparing textbook list...'}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </Card>
-        )}
-
-        <div className="mb-5 space-y-3">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-            <div className="inline-flex rounded-xl bg-slate-100 border border-slate-200 p-1 w-full sm:w-fit overflow-x-auto slim">
-              <CatalogTab
-                active={activeTab === 'all'}
-                onClick={() => { setActiveTab('all'); setGradeFilter('all'); }}
-                label={isAR ? 'كل الكتب' : 'All books'}
-                count={dbBooks.length}
-              />
-              <CatalogTab
-                active={activeTab === 'official'}
-                onClick={() => { setActiveTab('official'); setGradeFilter('all'); }}
-                label={isAR ? 'كتب الوزارة' : 'Ministry'}
-                count={officialBooks.length}
-              />
-              <CatalogTab
-                active={activeTab === 'added'}
-                onClick={() => { setActiveTab('added'); setGradeFilter('all'); }}
-                label={isAR ? 'المضافة' : 'Added'}
-                count={addedBooks.length}
-              />
-            </div>
-
-            <div className="flex items-center gap-2 text-[12px] justify-end">
-              <span className="text-slate-500">
-                {filtered.length} {isAR ? 'نتيجة' : filtered.length === 1 ? 'result' : 'results'}
-              </span>
-              {count > 0 ? (
-                <>
-                  <span className="font-bold text-sky-700">
-                    {count} {count === 1 ? t.books.selected : t.books.selectedPlural}
-                  </span>
-                  <button onClick={clearAll} className="text-slate-500 hover:text-rose-600 font-semibold">
-                    {t.books.clear}
-                  </button>
-                </>
-              ) : (
-                <button onClick={selectAllIndexed} className="text-slate-500 hover:text-sky-700 font-semibold">
-                  {t.books.selectAll}
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 bg-white border border-slate-200 p-3 rounded-xl shadow-sm">
-            {availableGrades.length > 0 && (
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-[12px] font-bold text-slate-400 px-2 uppercase">{isAR ? 'الصف:' : 'Grade:'}</span>
-                <FilterPill active={gradeFilter === 'all'} onClick={() => setGradeFilter('all')}>
-                  {t.books.filterAll}
-                </FilterPill>
-                {availableGrades.map((g) => (
-                  <FilterPill key={g} active={gradeFilter === g} onClick={() => setGradeFilter(g)}>
-                    {g}
-                  </FilterPill>
                 ))}
-                <div className="hidden md:block w-px h-6 bg-slate-200 mx-2" />
+
+                {filtered.length === 0 && (
+                  <Card className="p-8 text-center text-slate-500 w-full col-span-full">
+                    {booksLoading
+                      ? (isAR ? 'جاري تحميل الكتب...' : 'Loading textbooks…')
+                      : (isAR ? 'لا توجد كتب تطابق خيارات التصفية الحالية.' : 'No textbooks match the current filters.')}
+                  </Card>
+                )}
               </div>
             )}
-
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-[12px] font-bold text-slate-400 px-2 uppercase">{isAR ? 'المادة:' : 'Subject:'}</span>
-              <FilterPill active={subjectFilter === 'all'} onClick={() => setSubjectFilter('all')}>
-                {t.books.filterAll}
-              </FilterPill>
-              {Object.keys(SUBJECT_META).map((s) => {
-                const meta = SUBJECT_META[s as SubjectId];
-                const h = HUE[meta.hue];
-                return (
-                  <button
-                    key={s}
-                    onClick={() => setSubjectFilter(s as SubjectId)}
-                    className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-semibold border transition
-                      ${subjectFilter === s ? `${h.dot} text-white border-transparent` : 'bg-slate-50 text-slate-600 border-slate-200 hover:border-slate-300'}`}
-                  >
-                    <span>{meta.glyph}</span>
-                    <span>{isAR ? meta.ar : meta.en}</span>
-                  </button>
-                );
-              })}
-            </div>
           </div>
         </div>
 
-        {/* Book Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 lg:gap-5">
-          {/* Uploader Card inside Added Books Tab */}
-          {activeTab === 'added' && (
-            <div className="rounded-2xl border-2 border-dashed border-slate-200 p-6 flex flex-col items-center justify-center text-center bg-slate-50/50 hover:bg-slate-50 transition duration-300">
-              <input
-                type="file"
-                accept="application/pdf"
-                ref={fileInputRef}
-                onChange={handleFileChange}
-                className="hidden"
-              />
-              {!uploadFile ? (
-                <div className="flex flex-col items-center">
-                  <span className="text-4xl mb-2">📁</span>
-                  <h3 className="font-extrabold text-[14.5px] text-slate-800">{isAR ? 'أضف كتاب دراسي جديد' : 'Upload custom textbook'}</h3>
-                  <p className="text-[12px] text-slate-500 mt-1 max-w-[200px]">
-                    {isAR ? 'اسحب ملف PDF أو اضغط للتصفح' : 'Upload custom school textbook to parse'}
-                  </p>
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="mt-4 bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-[12px] px-4 py-2 rounded-xl transition shadow-sm"
-                  >
-                    {isAR ? 'تصفح الملفات' : 'Choose File'}
-                  </button>
-                </div>
-              ) : (
-                <div className="w-full text-start space-y-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl">📄</span>
-                    <span className="font-semibold text-[13px] text-slate-700 truncate flex-1">{uploadFile.name}</span>
-                  </div>
-                  
-                  {uploadProgress === null ? (
-                    <div className="space-y-2">
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-500 mb-1">{isAR ? 'العنوان:' : 'Title:'}</label>
-                        <input
-                          type="text"
-                          value={newBookMeta.title}
-                          onChange={(e) => setNewBookMeta(prev => ({ ...prev, title: e.target.value }))}
-                          className="w-full text-[12px] border border-slate-200 rounded-lg p-2 focus:outline-none focus:border-sky-500"
-                        />
-                      </div>
-                      
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-[11px] font-bold text-slate-500 mb-1">{isAR ? 'المادة:' : 'Subject:'}</label>
-                          <select
-                            value={newBookMeta.subject}
-                            onChange={(e) => setNewBookMeta(prev => ({ ...prev, subject: e.target.value as SubjectId }))}
-                            className="w-full text-[12px] border border-slate-200 rounded-lg p-2 focus:outline-none"
-                          >
-                            {Object.keys(SUBJECT_META).map(s => (
-                              <option key={s} value={s}>{isAR ? SUBJECT_META[s as SubjectId].ar : SUBJECT_META[s as SubjectId].en}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-[11px] font-bold text-slate-500 mb-1">{isAR ? 'الصف:' : 'Grade:'}</label>
-                          <select
-                            value={newBookMeta.grade}
-                            onChange={(e) => setNewBookMeta(prev => ({ ...prev, grade: e.target.value }))}
-                            className="w-full text-[12px] border border-slate-200 rounded-lg p-2 focus:outline-none"
-                          >
-                            <option value="G10">Grade 10</option>
-                            <option value="G11">Grade 11</option>
-                            <option value="G12">Grade 12</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      <div className="flex gap-2 pt-2 justify-end">
-                        <button
-                          onClick={() => setUploadFile(null)}
-                          className="text-[12px] font-bold text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 transition"
-                        >
-                          {isAR ? 'إلغاء' : 'Cancel'}
-                        </button>
-                        <button
-                          onClick={handleUploadAndParse}
-                          className="bg-sky-600 hover:bg-sky-700 text-white text-[12px] font-bold px-4 py-1.5 rounded-lg transition"
-                        >
-                          {isAR ? 'رفع ومعالجة' : 'Upload & Parse'}
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
-                        <div className="bg-sky-600 h-full transition-all duration-300" style={{ width: `${uploadProgress}%` }} />
-                      </div>
-                      <div className="flex justify-between text-[11px] text-slate-500">
-                        <span>{isAR ? 'جاري الرفع للذكاء الاصطناعي...' : 'Uploading to AI storage...'}</span>
-                        <span>{uploadProgress}%</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {uploadError && (
-                    <div className="text-[11px] text-rose-600 bg-rose-50 p-2 rounded-lg mt-2">
-                      ⚠️ {uploadError}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {filtered.map((b) => (
-            <div key={b.id} className="relative group">
-              <BookCard
-                book={b}
-                selected={selected.has(b.id)}
-                onToggle={() => toggle(b.id, b.status)}
-                onViewDetails={() => router.push(`/${locale}/books/${b.id}`)}
-              />
-              {activeTab === 'added' && (
-                <button
-                  onClick={() => handleDeleteBook(b.id)}
-                  className="absolute top-2 start-2 z-10 w-7 h-7 rounded-full bg-rose-50 border border-rose-200 text-rose-600 hover:bg-rose-500 hover:text-white transition grid place-items-center opacity-0 group-hover:opacity-100 shadow-sm"
-                  title={isAR ? 'حذف هذا الكتاب' : 'Delete this book'}
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-
-        {/* Empty State */}
-        {filtered.length === 0 && (
-          <Card className="p-8 text-center text-slate-500 mt-6">
-            {booksLoading
-              ? isAR
-                ? 'جاري تحميل الكتب من قاعدة البيانات…'
-                : 'Loading books from Firestore…'
-              : activeTab === 'added'
-              ? isAR
-                ? 'لم ترفع أي كتاب بعد. استخدم البطاقة أعلاه لرفع PDF خاص بك.'
-                : 'No custom books yet. Use the card above to upload a PDF.'
-              : dbBooks.length === 0
-              ? isAR
-                ? 'مستودع الكتب فارغ. افتح لوحة المزامنة ثم اضغط "بدء المزامنة" لتنزيل كتب الوزارة.'
-                : 'The book repository is empty. Open the Sync Console and press "Start Sync" to download MOE textbooks.'
-              : isAR
-              ? 'لا يوجد كتب تطابق هذا الفلتر.'
-              : 'No books match this filter.'}
-          </Card>
-        )}
-
-        {/* Result Panel */}
+        {/* Action Panel */}
         {action && (
           <div className="mt-6">
             <ResultPanel
@@ -996,6 +1054,54 @@ export default function BooksScreen() {
           </div>
         )}
       </div>
+
+      {/* Mobile Drawer Slide-over */}
+      {showMobileFilters && (
+        <div className="fixed inset-0 z-40 lg:hidden flex justify-end">
+          {/* Backdrop */}
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setShowMobileFilters(false)} />
+          {/* Content */}
+          <div className="relative w-80 max-w-[85vw] h-full bg-white shadow-2xl p-5 overflow-y-auto z-50 flex flex-col justify-between">
+            <div className="space-y-6">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+                <h3 className="font-extrabold text-slate-900 text-[15px]">
+                  {isAR ? 'تصفية المحتوى' : 'Filter Catalog'}
+                </h3>
+                <button
+                  onClick={() => { clearAllFilters(); setShowMobileFilters(false); }}
+                  className="text-[11.5px] font-bold text-slate-400 hover:text-sky-600 transition"
+                >
+                  {isAR ? 'إعادة ضبط' : 'Reset'}
+                </button>
+              </div>
+              
+              <FilterContent
+                isAR={isAR}
+                t={t}
+                subjectFilter={subjectFilter}
+                setSubjectFilter={(s: any) => { setSubjectFilter(s); setShowMobileFilters(false); }}
+                gradeFilter={gradeFilter}
+                setGradeFilter={(g: any) => { setGradeFilter(g); setShowMobileFilters(false); }}
+                stageFilter={stageFilter}
+                setStageFilter={(st: any) => { setStageFilter(st); setShowMobileFilters(false); }}
+                typeFilter={typeFilter}
+                setTypeFilter={(ty: any) => { setTypeFilter(ty); setShowMobileFilters(false); }}
+                catalogQuery={catalogQuery}
+                setCatalogQuery={setCatalogQuery}
+                availableGrades={availableGrades}
+                availableTypes={availableTypes}
+                activeTab={activeTab}
+              />
+            </div>
+            <button
+              onClick={() => setShowMobileFilters(false)}
+              className="mt-6 w-full py-2.5 bg-slate-900 text-white font-bold rounded-xl text-[13px] hover:bg-slate-800 transition"
+            >
+              {isAR ? 'عرض النتائج' : 'Show Results'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Glassmorphic Search Results Modal */}
       {showSearchModal && (
@@ -1046,7 +1152,7 @@ export default function BooksScreen() {
                         </span>
                       </div>
                       
-                      <div className="text-[12px] text-slate-600 line-clamp-3 mb-3 rtl leading-relaxed">
+                      <div className="text-[12px] text-slate-600 line-clamp-3 mb-3 rtl leading-relaxed font-normal">
                         {res.text}
                       </div>
 
@@ -1063,8 +1169,56 @@ export default function BooksScreen() {
         </div>
       )}
 
+      {/* Premium Video Modal Iframe Player */}
+      {selectedVideo && (() => {
+        const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+        const match = selectedVideo.youtubeUrl.match(regExp);
+        const youtubeId = (match && match[2].length === 11) ? match[2] : null;
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+            <div className="fixed inset-0" onClick={() => setSelectedVideo(null)} />
+            <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col z-50">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/50">
+                <div className="min-w-0">
+                  <span className="text-[10px] uppercase font-bold text-sky-400 tracking-wider">
+                    {selectedVideo.subject.toUpperCase()} · {selectedVideo.grade}
+                  </span>
+                  <h3 className="text-[15px] font-extrabold text-white truncate mt-0.5">
+                    {selectedVideo.title}
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setSelectedVideo(null)}
+                  className="w-8 h-8 rounded-full bg-slate-850 text-slate-400 hover:bg-slate-700 hover:text-white transition grid place-items-center font-bold text-[14px]"
+                >
+                  ✕
+                </button>
+              </div>
+              
+              <div className="relative w-full aspect-video bg-black">
+                {youtubeId ? (
+                  <iframe
+                    src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&rel=0`}
+                    title={selectedVideo.title}
+                    frameBorder="0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                    className="absolute inset-0 w-full h-full"
+                  />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center text-slate-400">
+                    {isAR ? 'رابط الفيديو غير صالح' : 'Invalid video URL'}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Sticky action bar */}
-      <div className={`sticky bottom-0 left-0 right-0 z-20 transition-transform ${count > 0 ? 'translate-y-0' : 'translate-y-full'}`}>
+      <div className={`fixed bottom-0 left-0 right-0 z-20 transition-transform ${count > 0 ? 'translate-y-0' : 'translate-y-full'}`}>
         <div className="bg-white border-t border-slate-200 shadow-lg">
           <div className="max-w-[1400px] mx-auto px-4 lg:px-10 py-3 flex items-center gap-2 overflow-x-auto slim">
             <div className="hidden sm:block text-[12px] text-slate-500 me-2 shrink-0">
@@ -1084,6 +1238,297 @@ export default function BooksScreen() {
         </div>
       </div>
     </ChromeLayout>
+  );
+}
+
+/* FilterContent Sub-component */
+function FilterContent({
+  isAR,
+  t,
+  subjectFilter,
+  setSubjectFilter,
+  gradeFilter,
+  setGradeFilter,
+  stageFilter,
+  setStageFilter,
+  typeFilter,
+  setTypeFilter,
+  catalogQuery,
+  setCatalogQuery,
+  availableGrades,
+  availableTypes,
+  activeTab
+}: {
+  isAR: boolean;
+  t: any;
+  subjectFilter: any;
+  setSubjectFilter: any;
+  gradeFilter: any;
+  setGradeFilter: any;
+  stageFilter: any;
+  setStageFilter: any;
+  typeFilter: any;
+  setTypeFilter: any;
+  catalogQuery: any;
+  setCatalogQuery: any;
+  availableGrades: string[];
+  availableTypes: string[];
+  activeTab: string;
+}) {
+  return (
+    <div className="space-y-6">
+      {/* 1. Free-text search input */}
+      <div>
+        <label className="block text-[11.5px] font-bold text-slate-400 uppercase mb-2">
+          {isAR ? 'بحث في العناوين:' : 'Search Text:'}
+        </label>
+        <div className="flex items-center gap-2 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 focus-within:border-slate-400 focus-within:bg-white transition">
+          <span className="text-slate-400">⌕</span>
+          <input
+            type="text"
+            value={catalogQuery}
+            onChange={(e) => setCatalogQuery(e.target.value)}
+            placeholder={isAR ? 'ابحث هنا...' : 'Find...'}
+            className="flex-1 bg-transparent border-none text-[13px] text-slate-800 focus:outline-none min-w-0"
+          />
+        </div>
+      </div>
+
+      {/* 2. Stage Filter */}
+      <div>
+        <label className="block text-[11.5px] font-bold text-slate-400 uppercase mb-2">
+          {isAR ? 'المرحلة الدراسية:' : 'Education Stage:'}
+        </label>
+        <div className="flex flex-col gap-1.5">
+          {[
+            { id: 'all', ar: 'كل المراحل', en: 'All Stages' },
+            { id: 'primary', ar: 'الابتدائي', en: 'Primary' },
+            { id: 'preparatory', ar: 'الإعدادي', en: 'Preparatory' },
+            { id: 'secondary', ar: 'الثانوي', en: 'Secondary' }
+          ].map((st) => (
+            <button
+              key={st.id}
+              onClick={() => setStageFilter(st.id as any)}
+              className={`text-start px-3.5 py-2 rounded-xl text-[13px] font-semibold border transition
+                ${stageFilter === st.id
+                  ? 'bg-slate-900 text-white border-slate-900 font-extrabold shadow-sm'
+                  : 'bg-white text-slate-650 border-slate-200 hover:border-slate-350 hover:bg-slate-50'}`}
+            >
+              {isAR ? st.ar : st.en}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 3. Grade Filter */}
+      {availableGrades.length > 0 && (
+        <div>
+          <label className="block text-[11.5px] font-bold text-slate-400 uppercase mb-2">
+            {isAR ? 'الصف الدراسي:' : 'Grade:'}
+          </label>
+          <select
+            value={gradeFilter}
+            onChange={(e) => setGradeFilter(e.target.value)}
+            className="w-full text-[13px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-850 focus:outline-none focus:border-sky-500 focus:bg-white transition"
+          >
+            <option value="all">{isAR ? 'كل الصفوف' : 'All Grades'}</option>
+            {availableGrades.map((g) => (
+              <option key={g} value={g}>{g}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* 4. Book Type (Only for textbooks) */}
+      {activeTab !== 'videos' && availableTypes.length > 0 && (
+        <div>
+          <label className="block text-[11.5px] font-bold text-slate-400 uppercase mb-2">
+            {isAR ? 'نوع الكتاب:' : 'Book Type:'}
+          </label>
+          <select
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value)}
+            className="w-full text-[13px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-850 focus:outline-none focus:border-sky-500 focus:bg-white transition"
+          >
+            <option value="all">{isAR ? 'كل الأنواع' : 'All Types'}</option>
+            {availableTypes.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* 5. Subject Filter */}
+      <div>
+        <label className="block text-[11.5px] font-bold text-slate-400 uppercase mb-2">
+          {isAR ? 'المواد الدراسية:' : 'Subjects:'}
+        </label>
+        <div className="space-y-1">
+          <button
+            onClick={() => setSubjectFilter('all')}
+            className={`w-full text-start px-3 py-2 rounded-xl text-[13px] font-semibold transition
+              ${subjectFilter === 'all'
+                ? 'bg-slate-100 text-slate-900 font-extrabold shadow-sm'
+                : 'text-slate-600 hover:bg-slate-50'}`}
+          >
+            📚 {isAR ? 'كل المواد' : 'All Subjects'}
+          </button>
+          {Object.keys(SUBJECT_META).map((s) => {
+            const meta = SUBJECT_META[s as SubjectId];
+            const active = subjectFilter === s;
+            return (
+              <button
+                key={s}
+                onClick={() => setSubjectFilter(s as SubjectId)}
+                className={`w-full text-start px-3 py-2 rounded-xl text-[13px] font-semibold transition flex items-center justify-between
+                  ${active ? 'bg-sky-50 text-sky-800 font-extrabold' : 'text-slate-650 hover:bg-slate-50'}`}
+              >
+                <span className="flex items-center gap-2">
+                  <span>{meta.glyph}</span>
+                  <span>{isAR ? meta.ar : meta.en}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* AgentTaskCard component */
+function AgentTaskCard({ name, status, progress, errorMessage, icon }: {
+  name: string; status: string; progress: number; errorMessage?: string; icon: string;
+}) {
+  const statusColors = {
+    completed: 'bg-emerald-50 border-emerald-100 text-emerald-700',
+    running: 'bg-sky-50 border-sky-100 text-sky-700 animate-pulse',
+    failed: 'bg-rose-50 border-rose-100 text-rose-700',
+    queued: 'bg-slate-50 border-slate-100 text-slate-500'
+  }[status] || 'bg-slate-50 text-slate-600';
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex items-start gap-4">
+      <span className="text-3xl p-2 bg-slate-50 rounded-xl">{icon}</span>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <h4 className="font-extrabold text-[13.5px] text-slate-900 truncate">{name}</h4>
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${statusColors}`}>
+            {status}
+          </span>
+        </div>
+        
+        {/* Concurrency friendly progress bar */}
+        <div className="mt-3 relative w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+          <div 
+            className={`h-full rounded-full transition-all duration-500 ${
+              status === 'failed' ? 'bg-rose-500' :
+              status === 'completed' ? 'bg-emerald-500' : 'bg-sky-600'
+            }`}
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <div className="flex justify-between text-[10px] text-slate-400 mt-1">
+          <span>{progress}%</span>
+          {errorMessage && (
+            <span className="text-rose-600 font-semibold truncate max-w-[80%]" title={errorMessage}>
+              {errorMessage}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* BookTaskRow component */
+function BookTaskRow({ task }: { task: any }) {
+  const status = task.status;
+  const progress = task.progress;
+
+  const statusIcon = status === 'completed' ? '🟢' :
+                     status === 'running' ? '🔵' :
+                     status === 'failed' ? '🔴' : '⏳';
+
+  return (
+    <div className="border border-slate-100 bg-slate-50/20 rounded-xl p-3 flex flex-col md:flex-row md:items-center justify-between gap-3 text-[12px]">
+      <div className="flex items-center gap-2 min-w-0 flex-1">
+        <span className="shrink-0">{statusIcon}</span>
+        <span className="font-semibold text-slate-700 truncate" title={task.name}>
+          {task.name}
+        </span>
+      </div>
+      
+      <div className="flex items-center gap-4 shrink-0 w-full md:w-auto">
+        <div className="flex-1 md:w-36 flex items-center gap-2">
+          <div className="relative w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+            <div 
+              className={`h-full rounded-full ${
+                status === 'failed' ? 'bg-rose-500' :
+                status === 'completed' ? 'bg-emerald-500' : 'bg-sky-600'
+              }`}
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          <span className="text-[10px] text-slate-500 font-bold min-w-[28px] text-end">{progress}%</span>
+        </div>
+        
+        {task.errorMessage && (
+          <span className="text-[11px] text-rose-600 max-w-[150px] truncate" title={task.errorMessage}>
+            ⚠️ {task.errorMessage}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* VideoCard component */
+function VideoCard({ video, onClick }: { video: Video; onClick: () => void }) {
+  const { isAR } = useApp();
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+  const match = video.youtubeUrl.match(regExp);
+  const youtubeId = (match && match[2].length === 11) ? match[2] : null;
+  const thumbnailUrl = youtubeId ? `https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg` : 'https://img.youtube.com/vi/placeholder/hqdefault.jpg';
+
+  return (
+    <div 
+      onClick={onClick}
+      className="relative group rounded-2xl border border-slate-200 bg-white overflow-hidden hover:border-sky-300 hover:shadow-md transition duration-300 flex flex-col cursor-pointer card-lift"
+    >
+      <div className="relative aspect-video bg-slate-900 overflow-hidden flex items-center justify-center">
+        <img 
+          src={thumbnailUrl} 
+          alt={video.title}
+          className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
+        />
+        <div className="absolute inset-0 bg-slate-950/20 group-hover:bg-slate-950/35 transition duration-300 flex items-center justify-center">
+          <div className="w-12 h-12 rounded-full bg-white/90 backdrop-blur shadow-md flex items-center justify-center text-sky-600 transform scale-90 group-hover:scale-100 transition duration-300">
+            <span className="text-[16px] ms-0.5">▶</span>
+          </div>
+        </div>
+        <div className="absolute top-2.5 start-2.5">
+          <SubjectChip id={video.subject} size="sm" />
+        </div>
+      </div>
+      
+      <div className="p-4 flex-1 flex flex-col justify-between">
+        <div>
+          <h3 className="font-extrabold text-slate-900 text-[14px] leading-snug line-clamp-2 group-hover:text-sky-700 transition">
+            {video.title}
+          </h3>
+          <div className="text-[11.5px] text-slate-500 mt-1">
+            {video.grade} · {video.stage}
+          </div>
+        </div>
+        <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
+          <span>{video.term}</span>
+          <span className="text-sky-600 font-bold flex items-center gap-0.5">
+            {isAR ? 'شاهد الشرح' : 'Watch Video'} ➔
+          </span>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1115,18 +1560,6 @@ function CatalogTab({ active, onClick, label, count }: { active: boolean; onClic
       <span className={`rounded-full px-2 py-0.5 text-[11px] ${active ? 'bg-sky-50 text-sky-700' : 'bg-white/70 text-slate-500'}`}>
         {count}
       </span>
-    </button>
-  );
-}
-
-function FilterPill({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-semibold border transition
-        ${active ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}
-    >
-      {children}
     </button>
   );
 }
@@ -1481,7 +1914,7 @@ function AudioBlock() {
         </div>
         <span className="text-slate-300 text-[12px] ltr">2:18</span>
       </div>
-      <p className="text-[13px] text-slate-600 mt-3 leading-relaxed">
+      <p className="text-[13px] text-slate-650 mt-3 leading-relaxed">
         {isAR
           ? 'الملخص الصوتي ده مولّد بواسطة AV agent، بصوت عربي مصري ودود. بيغطي الفصلين الأساسيين في الكتب اللي اخترتها.'
           : 'Audio summary generated by the AV agent in a warm Egyptian-Arabic voice. Covers the two core chapters across your selection.'}
