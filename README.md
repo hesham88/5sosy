@@ -4,9 +4,8 @@ Autonomous AI study assistant for Egyptian school students.
 Submission for the **Google for Startups AI Agents Challenge 2026, Track 1**.
 
 5sosy ingests Ministry-of-Education textbooks and orchestrates a 5-agent
-ensemble (built on **Google ADK** + **Gemini 2.5**) to replace the
-private-tutoring economy — 81% of Egyptian secondary students currently
-rely on private tutors.
+ensemble to democratize private tutoring and alternate to the current private-tutoring economy 
+where 81% of Egyptian secondary students currently rely on private tutors.
 
 > Give it a declarative intent — *"اختبار فيزياء بعد ٤٨ ساعة ومش فاهم قانون الغازات"* —
 > and it builds a plan, lessons, adaptive quizzes, and a mock oral exam in
