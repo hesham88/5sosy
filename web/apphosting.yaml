@@ -9,7 +9,7 @@ runConfig:
 
 env:
   - variable: NEXT_PUBLIC_FIREBASE_API_KEY
-    value: AIzaSyCJwgfsH3jmuy3IMHPkzbUXyhNTVIj28kQ
+    secret: firebase-web-api-key
     availability: [BUILD, RUNTIME]
   - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
     value: khsosy.firebaseapp.com
