@@ -47,8 +47,8 @@ from google.genai import types  # noqa: E402
 from onboarding_agent.agent import root_agent as onboarding_agent  # noqa: E402
 from orchestrator_agent.agent import root_agent as orchestrator_agent  # noqa: E402
 
-APP_NAME = "fivesosybot"
-ONBOARDING_APP_NAME = "fivesosybot-onboarding"
+APP_NAME = "khsosybot"
+ONBOARDING_APP_NAME = "khsosybot-onboarding"
 API_KEY = os.getenv("AGENTS_API_KEY")
 ALLOWED_ORIGINS = [
     o.strip()
@@ -379,7 +379,7 @@ async def onboarding(
 FIRESTORE_PROJECT = os.getenv("FIRESTORE_PROJECT", "khsosy")
 FIRESTORE_DATABASE = os.getenv("FIRESTORE_DATABASE", "(default)")
 GCS_BUCKET = os.getenv("GCS_BUCKET", "khsosy.firebasestorage.app")
-SYNC_JOB_NAME = os.getenv("SYNC_JOB_NAME", "fivesosybot-sync")
+SYNC_JOB_NAME = os.getenv("SYNC_JOB_NAME", "khsosybot-sync")
 SYNC_JOB_REGION = os.getenv("SYNC_JOB_REGION", "us-east4")
 SYNC_JOB_PROJECT = os.getenv("SYNC_JOB_PROJECT", FIRESTORE_PROJECT)
 
@@ -404,8 +404,7 @@ def _starting_log() -> list[dict]:
 
 def _seed_status_running() -> None:
     """Eagerly seed `ingestion/status` so the UI has something to render
-    before the Cloud Run Job container even starts. Preserves history
-    (booksList, totalPagesProcessed) from previous runs."""
+    before the Cloud Run Job container even starts. Wipes old booksList."""
     status_ref = db.collection("ingestion").document("status")
     existing = status_ref.get().to_dict() or {}
     status_ref.set(
@@ -421,12 +420,12 @@ def _seed_status_running() -> None:
             "percentage": existing.get("percentage", 0.0),
             "activeBookId": "",
             "activeBookTitle": "",
-            "booksList": existing.get("booksList", {}),
+            "booksList": {},
             "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
             "executionName": "",
             "errorMessage": "",
         },
-        merge=True,
+        merge=False,
     )
 
 
@@ -486,6 +485,97 @@ def _cancel_sync_execution(execution_name: str) -> bool:
     except Exception as exc:  # noqa: BLE001
         print(f"Failed to cancel execution {full}: {exc}")
         return False
+
+
+async def _monitor_sync_execution(execution_name: str = ""):
+    """Poll Cloud Run Execution status in the background. If the execution
+    completes with failure/abrupt exit (e.g. OOM/SIGKILL), we update the status
+    document in Firestore to 'error'."""
+    print(f"Starting background monitoring for Cloud Run execution (initial: '{execution_name}')")
+    client = run_v2.ExecutionsClient()
+    active_exec = execution_name
+
+    while True:
+        await asyncio.sleep(15)
+
+        # Check current firestore status
+        try:
+            status_ref = db.collection("ingestion").document("status")
+            status_doc = await asyncio.get_running_loop().run_in_executor(None, status_ref.get)
+            status_data = status_doc.to_dict() or {}
+
+            if status_data.get("status") != "running":
+                print(f"Monitoring stopped for execution '{active_exec}' because Firestore status is '{status_data.get('status')}'")
+                break
+
+            # If we started without an execution name, or if it changed, update our active target
+            current_exec = status_data.get("executionName", "")
+            if current_exec and current_exec != active_exec:
+                print(f"Monitoring switched execution target from '{active_exec}' to '{current_exec}'")
+                active_exec = current_exec
+        except Exception as e:
+            print(f"Error checking Firestore status in monitor: {e}")
+            continue
+
+        if not active_exec:
+            print("No execution name available yet to poll. Waiting...")
+            continue
+
+        # Poll Cloud Run Execution
+        try:
+            full_name = _ensure_execution_path(active_exec)
+            execution = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: client.get_execution(name=full_name)
+            )
+
+            status = getattr(execution, "status", None)
+            if status is None:
+                continue
+
+            is_completed = False
+            is_failed = False
+            err_msg = "Unknown execution failure (abrupt exit or OOM)"
+
+            if getattr(status, "completion_time", None):
+                is_completed = True
+
+            conditions = getattr(status, "conditions", [])
+            completed_cond = next((c for c in conditions if getattr(c, "type", "") == "Completed"), None)
+            if completed_cond:
+                status_str = str(getattr(completed_cond, "status", "")).lower()
+                if "false" in status_str:
+                    is_failed = True
+                    err_msg = getattr(completed_cond, "message", "Execution failed")
+                elif "true" in status_str:
+                    pass
+
+            if getattr(status, "failed_count", 0) > 0:
+                is_failed = True
+
+            if is_completed:
+                if is_failed:
+                    print(f"Execution {active_exec} failed. Marking Firestore status as error: {err_msg}")
+                    latest_doc = await asyncio.get_running_loop().run_in_executor(None, status_ref.get)
+                    latest_data = latest_doc.to_dict() or {}
+                    if latest_data.get("status") == "running":
+                        status_ref.update({
+                            "status": "error",
+                            "errorMessage": f"Sync job failed: {err_msg}",
+                            "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
+                        })
+                else:
+                    print(f"Execution {active_exec} completed successfully.")
+                    latest_doc = await asyncio.get_running_loop().run_in_executor(None, status_ref.get)
+                    latest_data = latest_doc.to_dict() or {}
+                    if latest_data.get("status") == "running":
+                        status_ref.update({
+                            "status": "completed",
+                            "progressMessage": "Sync completed successfully.",
+                            "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
+                        })
+                break
+        except Exception as e:
+            print(f"Error polling execution status for '{active_exec}': {e}")
 
 
 class IngestionSyncRequest(BaseModel):
@@ -553,6 +643,7 @@ async def ingestion_sync(
         if execution_name:
             update_fields["executionName"] = execution_name
         status_ref.update(update_fields)
+        asyncio.create_task(_monitor_sync_execution(execution_name))
         return {
             "ok": True,
             "status": "running",
@@ -590,6 +681,7 @@ async def ingestion_sync(
             raise HTTPException(status_code=500, detail=f"Failed to launch sync job: {exc}")
         if execution_name:
             status_ref.update({"executionName": execution_name})
+        asyncio.create_task(_monitor_sync_execution(execution_name))
         return {
             "ok": True,
             "status": "running",
@@ -695,12 +787,19 @@ async def load_pages_cache():
             for doc in docs:
                 data = doc.to_dict()
                 if "embedding" in data and data["embedding"]:
+                    emb_val = data["embedding"]
+                    if isinstance(emb_val, bytes):
+                        import struct
+                        num_floats = len(emb_val) // 4
+                        emb_list = list(struct.unpack(f"{num_floats}f", emb_val))
+                    else:
+                        emb_list = list(emb_val)
                     new_cache.append({
                         "bookId": data.get("bookId"),
                         "bookTitle": data.get("bookTitle", "Unknown Book"),
                         "pageNumber": data.get("pageNumber"),
                         "text": data.get("text", ""),
-                        "embedding": data["embedding"],
+                        "embedding": emb_list,
                         "grade": data.get("grade", ""),
                         "subject": data.get("subject", ""),
                         "language": data.get("language", "ar"),
@@ -716,6 +815,20 @@ async def load_pages_cache():
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(load_pages_cache())
+
+    async def check_and_start_monitor():
+        try:
+            status_ref = db.collection("ingestion").document("status")
+            status_doc = await asyncio.get_running_loop().run_in_executor(None, status_ref.get)
+            status_data = status_doc.to_dict() or {}
+            if status_data.get("status") == "running":
+                exec_name = status_data.get("executionName", "")
+                print(f"Detected running ingestion sync on startup. Restarting monitor for execution: {exec_name}")
+                asyncio.create_task(_monitor_sync_execution(exec_name))
+        except Exception as e:
+            print(f"Error starting execution monitor on startup: {e}")
+
+    asyncio.create_task(check_and_start_monitor())
 
 class SearchRequest(BaseModel):
     query: str

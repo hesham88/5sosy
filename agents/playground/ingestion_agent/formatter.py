@@ -16,6 +16,7 @@ MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 class BookFormatterAgent:
     def __init__(self, model_name: str = MODEL):
         self.model_name = model_name
+        self.client = genai.Client()
 
     async def format_single_page(
         self,
@@ -35,8 +36,6 @@ class BookFormatterAgent:
         Returns:
             Dict containing 'pageNumber' and 'text' (styled markdown/HTML).
         """
-        client = genai.Client()
-        
         # Create temp file for upload
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
             tmp_file.write(page_pdf_bytes)
@@ -47,7 +46,7 @@ class BookFormatterAgent:
                 print(f"[Formatter] Starting formatting page {page_num}...")
                 
                 # Upload to Gemini File API
-                uploaded = await client.aio.files.upload(file=tmp_path)
+                uploaded = await self.client.aio.files.upload(file=tmp_path)
 
                 prompt = (
                     "You are a textbook layout and formatting expert. Perform OCR on this page of the textbook.\n"
@@ -62,15 +61,17 @@ class BookFormatterAgent:
                 delay = 2.0
                 for attempt in range(max_retries):
                     try:
-                        response = await client.aio.models.generate_content(
+                        response = await self.client.aio.models.generate_content(
                             model=self.model_name,
                             contents=[uploaded, prompt]
                         )
                         formatted_text = response.text or ""
+                        if len(formatted_text) > 150000:
+                            formatted_text = formatted_text[:150000] + "\n\n...[Content Truncated due to Firestore Size Limits]..."
                         
                         # Cleanup Gemini file
                         try:
-                            await client.aio.files.delete(name=uploaded.name)
+                            await self.client.aio.files.delete(name=uploaded.name)
                         except Exception:
                             pass
                             

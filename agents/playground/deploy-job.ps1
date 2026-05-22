@@ -8,7 +8,7 @@
 
 [CmdletBinding()]
 param(
-  [string]$Job     = "fivesosybot-sync",
+  [string]$Job     = "khsosybot-sync",
   [string]$Region  = "us-east4",
   [string]$Project = "khsosy"
 )

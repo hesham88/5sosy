@@ -67,12 +67,12 @@ function Ensure-Secret($name, $value) {
 }
 
 Ensure-Secret "gemini-api-key" $GeminiKey
-Ensure-Secret "fivesosybot-api-key" $AgentsKey
+Ensure-Secret "khsosybot-api-key" $AgentsKey
 
 # Grant the Cloud Run runtime SA access to read both secrets.
 $projectNumber = gcloud projects describe $Project --format="value(projectNumber)"
 $runtimeSa = "$projectNumber-compute@developer.gserviceaccount.com"
-foreach ($secret in @("gemini-api-key", "fivesosybot-api-key")) {
+foreach ($secret in @("gemini-api-key", "khsosybot-api-key")) {
   gcloud secrets add-iam-policy-binding $secret `
     --project $Project `
     --member "serviceAccount:$runtimeSa" `
@@ -81,7 +81,7 @@ foreach ($secret in @("gemini-api-key", "fivesosybot-api-key")) {
 
 Write-Host "`nSecrets ready in project $Project." -ForegroundColor Green
 Write-Host "gemini-api-key        -> existing version added or kept"
-Write-Host "fivesosybot-api-key   -> value below (also accessible via gcloud secrets versions access latest --secret fivesosybot-api-key)"
+Write-Host "khsosybot-api-key   -> value below (also accessible via gcloud secrets versions access latest --secret khsosybot-api-key)"
 Write-Host ""
 Write-Host "AGENTS_API_KEY = $AgentsKey" -ForegroundColor Magenta
 Write-Host ""

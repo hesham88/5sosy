@@ -18,7 +18,7 @@ from google.genai import types
 
 from .search import grounded_search_agent
 
-_APP_NAME = "fivesosybot_search"
+_APP_NAME = "khsosybot_search"
 _session_service = InMemorySessionService()
 _runner = Runner(
     agent=grounded_search_agent,

@@ -234,6 +234,91 @@ async def _embed_with_retry(client, text: str, max_attempts: int = 4) -> list[fl
     return [0.0] * EMBEDDING_DIM
 
 
+async def _get_localized_metadata(client, metadata: dict[str, Any]) -> dict[str, str]:
+    """Translate book metadata (title, stage, grade, term, type, subject) to English and Arabic using Gemini 2.5 Flash."""
+    title = metadata.get("title", "")
+    stage = metadata.get("stage", "")
+    grade = metadata.get("grade", "")
+    term = metadata.get("term", "")
+    book_type = metadata.get("type", "")
+    subject = metadata.get("subject", "")
+    
+    prompt = (
+        f"You are a translation and localization expert. Translate/localize the following school textbook metadata to both Arabic and English.\n"
+        f"Input metadata:\n"
+        f"- Raw Title: {title}\n"
+        f"- Subject: {subject}\n"
+        f"- Stage: {stage}\n"
+        f"- Grade: {grade}\n"
+        f"- Term: {term}\n"
+        f"- Type: {book_type}\n\n"
+        f"Please output a JSON object with exactly the following keys:\n"
+        f"- \"arT\": The book title localized in Arabic\n"
+        f"- \"enT\": The book title localized/translated in English\n"
+        f"- \"arSub\": A natural Arabic subtitle incorporating the stage, grade, term, and type\n"
+        f"- \"enSub\": A natural English subtitle incorporating the stage, grade, term, and type\n"
+        f"- \"arStage\": The school stage localized in Arabic\n"
+        f"- \"enStage\": The school stage localized/translated in English\n"
+        f"- \"arGrade\": The grade localized in Arabic\n"
+        f"- \"enGrade\": The grade localized/translated in English\n"
+        f"- \"arTerm\": The term/semester localized in Arabic\n"
+        f"- \"enTerm\": The term/semester localized/translated in English\n"
+        f"- \"arType\": The book type (e.g. Student Book) localized in Arabic\n"
+        f"- \"enType\": The book type localized/translated in English\n"
+        f"- \"arSubject\": The subject localized in Arabic\n"
+        f"- \"enSubject\": The subject localized/translated in English\n\n"
+        f"Ensure the output is valid JSON."
+    )
+    
+    # Default/fallback values
+    fallback = {
+        "arT": title,
+        "enT": title,
+        "arSub": f"{stage} - {grade} - {term} - {book_type}".strip(" -"),
+        "enSub": f"{stage} - {grade} - {term} - {book_type}".strip(" -"),
+        "arStage": stage,
+        "enStage": stage,
+        "arGrade": grade,
+        "enGrade": grade,
+        "arTerm": term,
+        "enTerm": term,
+        "arType": book_type,
+        "enType": book_type,
+        "arSubject": subject,
+        "enSubject": subject
+    }
+    
+    try:
+        response = await client.aio.models.generate_content(
+            model="gemini-3.1-flash-lite",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json"
+            )
+        )
+        text = response.text or ""
+        data = json.loads(text.strip())
+        return {
+            "arT": _sanitize_text(data.get("arT", fallback["arT"])),
+            "enT": _sanitize_text(data.get("enT", fallback["enT"])),
+            "arSub": _sanitize_text(data.get("arSub", fallback["arSub"])),
+            "enSub": _sanitize_text(data.get("enSub", fallback["enSub"])),
+            "arStage": _sanitize_text(data.get("arStage", fallback["arStage"])),
+            "enStage": _sanitize_text(data.get("enStage", fallback["enStage"])),
+            "arGrade": _sanitize_text(data.get("arGrade", fallback["arGrade"])),
+            "enGrade": _sanitize_text(data.get("enGrade", fallback["enGrade"])),
+            "arTerm": _sanitize_text(data.get("arTerm", fallback["arTerm"])),
+            "enTerm": _sanitize_text(data.get("enTerm", fallback["enTerm"])),
+            "arType": _sanitize_text(data.get("arType", fallback["arType"])),
+            "enType": _sanitize_text(data.get("enType", fallback["enType"])),
+            "arSubject": _sanitize_text(data.get("arSubject", fallback["arSubject"])),
+            "enSubject": _sanitize_text(data.get("enSubject", fallback["enSubject"]))
+        }
+    except Exception as e:
+        print(f"[Parser] Localization metadata generation failed: {e}. Using fallback values.")
+        return fallback
+
+
 async def index_book_to_firestore(book_id: str, ocr_results_json: str, book_metadata_json: str) -> str:
     """Assemble final indexed textbook document, save to Firestore 'books' (lean
     metadata) + 'books/{id}/content/full' (pagesList + joined text) + 'books/{id}/pages'
@@ -253,10 +338,13 @@ async def index_book_to_firestore(book_id: str, ocr_results_json: str, book_meta
     except Exception as e:
         return f"Error parsing input JSONs: {e}"
 
-    # Sanitize every OCR page so an invalid surrogate from one page can't break
+    # Sanitize and truncate every OCR page so an invalid surrogate from one page can't break
     # downstream Firestore writes or the web listener.
     for p in ocr_results:
-        p["text"] = _sanitize_text(p.get("text", ""))
+        t = _sanitize_text(p.get("text", ""))
+        if len(t) > 150000:
+            t = t[:150000] + "\n\n...[Content Truncated due to Firestore Size Limits]..."
+        p["text"] = t
 
     db = firestore.Client(project=FIRESTORE_PROJECT, database=FIRESTORE_DATABASE)
     storage_client = storage.Client()
@@ -270,6 +358,9 @@ async def index_book_to_firestore(book_id: str, ocr_results_json: str, book_meta
 
     title = _sanitize_text(book_metadata.get("title", book_metadata.get("subject", "Unknown Book")))
     subject = _sanitize_text(book_metadata.get("subject", ""))
+
+    # Get localized metadata
+    localized = await _get_localized_metadata(client, book_metadata)
 
     # LEAN main book doc — no pagesList, no full text. Bulk content lives in the
     # `content/full` subcollection doc so the /books grid listener pulls ~2 KB
@@ -288,80 +379,122 @@ async def index_book_to_firestore(book_id: str, ocr_results_json: str, book_meta
         "storagePath": book_metadata.get("gcsUri", ""),
         "chapters": book_metadata.get("chapters", 8),
         "pages": len(ocr_results),
-        "status": "indexed",
+        "status": "indexing",
         "createdAt": firestore.SERVER_TIMESTAMP,
         "updatedAt": firestore.SERVER_TIMESTAMP,
+        **localized
     }
 
-    print(f"Indexing textbook (lean) to Firestore: books/{book_id}")
-    db.collection("books").document(book_id).set(book_doc)
-
-    # Bulk content — full joined text + per-page list. Split into multiple
-    # chunks if it exceeds Firestore's 1 MiB doc limit.
-    content_payload = {
-        "bookId": book_id,
-        "pagesList": ocr_results,
-        "text": full_rich_text,
-        "updatedAt": firestore.SERVER_TIMESTAMP,
-    }
     try:
-        db.collection("books").document(book_id).collection("content").document("full").set(content_payload)
-    except Exception as e:
-        # Some books exceed 1 MiB joined — fall back to writing just pagesList.
-        print(f"content/full write failed (likely >1 MiB): {e} — retrying without joined text")
-        db.collection("books").document(book_id).collection("content").document("full").set(
-            {"bookId": book_id, "pagesList": ocr_results, "updatedAt": firestore.SERVER_TIMESTAMP}
-        )
+        print(f"Indexing textbook (lean) to Firestore: books/{book_id}")
+        db.collection("books").document(book_id).set(book_doc)
 
-    print(f"Generating page-level embeddings using models/{EMBEDDING_MODEL} for book: {book_id}")
-    embed_semaphore = asyncio.Semaphore(5)
+        # Bulk content — full joined text + per-page list. Split into multiple
+        # chunks if it exceeds Firestore's 1 MiB doc limit.
+        content_payload = {
+            "bookId": book_id,
+            "pagesList": ocr_results,
+            "text": full_rich_text,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }
+        try:
+            db.collection("books").document(book_id).collection("content").document("full").set(content_payload)
+        except Exception as e:
+            # Some books exceed 1 MiB joined — fall back to writing just pagesList.
+            print(f"content/full write failed (likely >1 MiB): {e} — retrying without joined text")
+            try:
+                db.collection("books").document(book_id).collection("content").document("full").set(
+                    {"bookId": book_id, "pagesList": ocr_results, "updatedAt": firestore.SERVER_TIMESTAMP}
+                )
+            except Exception as e2:
+                print(f"PagesList joined document write failed as well: {e2}. Writing pagesList: [] as fallback...")
+                db.collection("books").document(book_id).collection("content").document("full").set({
+                    "bookId": book_id,
+                    "pagesList": [],
+                    "text": "",
+                    "updatedAt": firestore.SERVER_TIMESTAMP
+                })
 
-    async def embed_single_page(p):
-        p_num = p.get("pageNumber")
-        p_text = p.get("text", "")
-        if not p_text.strip():
-            return p_num, [0.0] * EMBEDDING_DIM
-        async with embed_semaphore:
-            emb = await _embed_with_retry(client, p_text)
-            return p_num, emb
+        print(f"Generating page-level embeddings using models/{EMBEDDING_MODEL} for book: {book_id}")
+        embed_semaphore = asyncio.Semaphore(5)
 
-    embed_tasks = [embed_single_page(p) for p in ocr_results]
-    embed_results = await asyncio.gather(*embed_tasks)
-    embeddings_map = {p_num: emb for p_num, emb in embed_results}
-    
-    # Index pages to subcollection 'pages' in batches
-    print(f"Writing page documents with embeddings to books/{book_id}/pages subcollection...")
-    
-    # Break into batches of 400 documents to avoid Firestore batch limits (max 500)
-    pages_to_write = list(ocr_results)
-    batch_size = 400
-    loop = asyncio.get_running_loop()
-    
-    for i in range(0, len(pages_to_write), batch_size):
-        chunk = pages_to_write[i:i + batch_size]
-        batch = db.batch()
-        for p in chunk:
+        async def embed_single_page(p):
             p_num = p.get("pageNumber")
             p_text = p.get("text", "")
-            emb_vector = embeddings_map.get(p_num, [0.0] * 3072)
-            
-            page_ref = db.collection("books").document(book_id).collection("pages").document(f"page_{p_num}")
-            batch.set(page_ref, {
-                "pageNumber": p_num,
-                "text": p_text,
-                "bookId": book_id,
-                "bookTitle": book_doc["title"],
-                "grade": book_doc["grade"],
-                "subject": book_doc["subject"],
-                "stage": book_doc["stage"],
-                "term": book_doc["term"],
-                "type": book_doc["type"],
-                "language": book_doc["language"],
-                "year": book_doc["year"],
-                "embedding": emb_vector
-            })
-        await loop.run_in_executor(None, batch.commit)
+            if not p_text.strip():
+                return p_num, [0.0] * EMBEDDING_DIM
+            async with embed_semaphore:
+                emb = await _embed_with_retry(client, p_text)
+                return p_num, emb
+
+        embed_tasks = [embed_single_page(p) for p in ocr_results]
+        embed_results = await asyncio.gather(*embed_tasks)
+        embeddings_map = {p_num: emb for p_num, emb in embed_results}
         
+        # Index pages to subcollection 'pages' in batches
+        print(f"Writing page documents with embeddings to books/{book_id}/pages subcollection...")
+        
+        # Break into batches of 400 documents to avoid Firestore batch limits (max 500)
+        pages_to_write = list(ocr_results)
+        batch_size = 400
+        loop = asyncio.get_running_loop()
+        
+        for i in range(0, len(pages_to_write), batch_size):
+            chunk = pages_to_write[i:i + batch_size]
+            batch = db.batch()
+            for p in chunk:
+                p_num = p.get("pageNumber")
+                p_text = p.get("text", "")
+                emb_vector = embeddings_map.get(p_num, [0.0] * 3072)
+                
+                import struct
+                emb_bytes = struct.pack(f"{len(emb_vector)}f", *emb_vector)
+                
+                page_ref = db.collection("books").document(book_id).collection("pages").document(f"page_{p_num}")
+                batch.set(page_ref, {
+                    "pageNumber": p_num,
+                    "text": p_text,
+                    "bookId": book_id,
+                    "bookTitle": book_doc["title"],
+                    "grade": book_doc["grade"],
+                    "subject": book_doc["subject"],
+                    "stage": book_doc["stage"],
+                    "term": book_doc["term"],
+                    "type": book_doc["type"],
+                    "language": book_doc["language"],
+                    "year": book_doc["year"],
+                    "embedding": emb_bytes,
+                    "arStage": localized.get("arStage", book_doc["stage"]),
+                    "enStage": localized.get("enStage", book_doc["stage"]),
+                    "arGrade": localized.get("arGrade", book_doc["grade"]),
+                    "enGrade": localized.get("enGrade", book_doc["grade"]),
+                    "arTerm": localized.get("arTerm", book_doc["term"]),
+                    "enTerm": localized.get("enTerm", book_doc["term"]),
+                    "arType": localized.get("arType", book_doc["type"]),
+                    "enType": localized.get("enType", book_doc["type"]),
+                    "arSubject": localized.get("arSubject", book_doc["subject"]),
+                    "enSubject": localized.get("enSubject", book_doc["subject"])
+                })
+            await loop.run_in_executor(None, batch.commit)
+
+        # Update status to 'indexed' at the very end
+        print(f"Finalizing status to indexed for book: {book_id}")
+        db.collection("books").document(book_id).update({
+            "status": "indexed",
+            "updatedAt": firestore.SERVER_TIMESTAMP
+        })
+    except Exception as exc:
+        print(f"Error indexing book {book_id} to Firestore: {exc}")
+        try:
+            db.collection("books").document(book_id).set({
+                "status": "failed",
+                "errorMessage": str(exc),
+                "updatedAt": firestore.SERVER_TIMESTAMP
+            }, merge=True)
+        except Exception as inner_exc:
+            print(f"Failed to set failed status for book {book_id}: {inner_exc}")
+        raise exc
+
     # Delete temporary GCS split files
     print(f"Cleaning up temporary split files in GCS: temp_splits/{book_id}/")
     bucket = storage_client.bucket(GCS_BUCKET)

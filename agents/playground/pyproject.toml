@@ -1,7 +1,7 @@
 [project]
-name = "fivesosy-playground"
+name = "khsosy-playground"
 version = "0.1.0"
-description = "5sosybot POC — orchestrator + executor with grounded Google Search via ADK"
+description = "khsosybot POC — orchestrator + executor with grounded Google Search via ADK"
 requires-python = ">=3.11"
 readme = "README.md"
 license = { text = "Apache-2.0" }

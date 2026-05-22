@@ -78,7 +78,7 @@ year_research_agent = Agent(
     tools=[google_search],
 )
 
-_APP_NAME = "fivesosybot_year_research"
+_APP_NAME = "khsosybot_year_research"
 _session_service = InMemorySessionService()
 _runner = Runner(
     agent=year_research_agent,

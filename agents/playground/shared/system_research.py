@@ -68,7 +68,7 @@ education_system_agent = Agent(
     tools=[google_search],
 )
 
-_APP_NAME = "fivesosybot_system_research"
+_APP_NAME = "khsosybot_system_research"
 _session_service = InMemorySessionService()
 _runner = Runner(
     agent=education_system_agent,

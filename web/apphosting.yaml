@@ -32,10 +32,10 @@ env:
 
   # 5sosybot agents service (Cloud Run, project khsosy/us-east4).
   - variable: AGENTS_BASE_URL
-    value: https://fivesosybot-ujeiecpdja-uk.a.run.app
+    value: https://khsosybot-ujeiecpdja-uk.a.run.app
     availability: [RUNTIME]
   - variable: AGENTS_API_KEY
-    secret: fivesosybot-api-key
+    secret: khsosybot-api-key
     availability: [RUNTIME]
 
   # Legacy 5-agent stack (orchestrator/ingestion/pedagogy/assessment/av) — still

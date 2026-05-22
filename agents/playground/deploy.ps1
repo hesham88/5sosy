@@ -12,7 +12,7 @@
 
 [CmdletBinding()]
 param(
-  [string]$Service = "fivesosybot",
+  [string]$Service = "khsosybot",
   [string]$Region  = "us-east4",
   [string]$Project = "khsosy"
 )
@@ -54,7 +54,7 @@ if (-not $repoExists) {
 
 $webOrigins = "http://localhost:3000,https://khsosyapphosting--khsosy.us-east4.hosted.app"
 # `^@^` overrides gcloud's default `,` delimiter so commas inside ALLOWED_ORIGINS don't break parsing.
-$envVars = "^@^GEMINI_MODEL=gemini-3.1-flash-lite@GOOGLE_GENAI_USE_VERTEXAI=FALSE@ALLOWED_ORIGINS=$webOrigins@SYNC_JOB_NAME=fivesosybot-sync@SYNC_JOB_REGION=$Region@SYNC_JOB_PROJECT=$Project@GCS_BUCKET=khsosy.firebasestorage.app"
+$envVars = "^@^GEMINI_MODEL=gemini-3.1-flash-lite@GOOGLE_GENAI_USE_VERTEXAI=FALSE@ALLOWED_ORIGINS=$webOrigins@SYNC_JOB_NAME=khsosybot-sync@SYNC_JOB_REGION=$Region@SYNC_JOB_PROJECT=$Project@GCS_BUCKET=khsosy.firebasestorage.app"
 
 Write-Host "Deploying $Service to $Region in $Project (this builds the container in Cloud Build)..." -ForegroundColor Cyan
 
@@ -77,7 +77,7 @@ gcloud run deploy $Service `
   --concurrency 10 `
   --timeout 3600 `
   --set-env-vars $envVars `
-  --set-secrets "GOOGLE_API_KEY=gemini-api-key:latest,AGENTS_API_KEY=fivesosybot-api-key:latest"
+  --set-secrets "GOOGLE_API_KEY=gemini-api-key:latest,AGENTS_API_KEY=khsosybot-api-key:latest"
 
 if ($LASTEXITCODE -ne 0) {
   Write-Host "Deploy failed." -ForegroundColor Red

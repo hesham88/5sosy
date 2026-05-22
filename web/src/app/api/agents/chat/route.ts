@@ -10,8 +10,8 @@ function sim(message: string, locale: string): Response {
   const startedAt = new Date().toISOString();
   const finalText =
     locale === 'ar'
-      ? 'الـ5sosybot لسه ما اتربطش بالـ Cloud Run. ضبط AGENTS_BASE_URL و AGENTS_API_KEY في الـ env.'
-      : "5sosybot isn't wired to Cloud Run yet — set AGENTS_BASE_URL and AGENTS_API_KEY in env.";
+      ? 'الـkhsosybot لسه ما اتربطش بالـ Cloud Run. ضبط AGENTS_BASE_URL و AGENTS_API_KEY في الـ env.'
+      : "khsosybot isn't wired to Cloud Run yet — set AGENTS_BASE_URL and AGENTS_API_KEY in env.";
   const trace = [
     {
       index: 0,

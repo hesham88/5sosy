@@ -2,7 +2,8 @@ export type Locale = 'ar' | 'en';
 
 export type SubjectId =
   | 'physics' | 'chemistry' | 'biology' | 'arabic' | 'history'
-  | 'english' | 'math' | 'geology' | 'philosophy' | 'geography';
+  | 'english' | 'math' | 'geology' | 'philosophy' | 'geography'
+  | 'science';
 
 export type Grade = 'g1' | 'g2' | 'g3';
 export type Track = 'sci_sci' | 'sci_math' | 'lit';
@@ -66,6 +67,16 @@ export type Book = {
   errorMessage?: string;
   createdAtMs?: number;
   updatedAtMs?: number;
+  arStage?: string;
+  enStage?: string;
+  arGrade?: string;
+  enGrade?: string;
+  arTerm?: string;
+  enTerm?: string;
+  arType?: string;
+  enType?: string;
+  arSubject?: string;
+  enSubject?: string;
 };
 
 export type SubjectProgress = {
@@ -195,4 +206,3 @@ export type Video = {
   sourceUrl: string;
   createdAtMs?: number;
 };
-

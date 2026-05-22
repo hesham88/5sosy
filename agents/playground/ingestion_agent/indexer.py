@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 from typing import List, Dict, Any, Optional, Callable, Awaitable
 from google import genai
+from google.genai import types
 from google.cloud import firestore
 from google.cloud import storage
 
@@ -29,6 +30,90 @@ class StorageIndexerAgent:
         self.storage_client = storage_client
         self.bucket_name = bucket_name
         self.client = genai.Client()
+
+    async def _get_localized_metadata(self, metadata: Dict[str, Any]) -> Dict[str, str]:
+        """Translate book metadata (title, stage, grade, term, type, subject) to English and Arabic using Gemini 2.5 Flash."""
+        title = metadata.get("title", "")
+        stage = metadata.get("stage", "")
+        grade = metadata.get("grade", "")
+        term = metadata.get("term", "")
+        book_type = metadata.get("type", "")
+        subject = metadata.get("subject", "")
+        
+        prompt = (
+            f"You are a translation and localization expert. Translate/localize the following school textbook metadata to both Arabic and English.\n"
+            f"Input metadata:\n"
+            f"- Raw Title: {title}\n"
+            f"- Subject: {subject}\n"
+            f"- Stage: {stage}\n"
+            f"- Grade: {grade}\n"
+            f"- Term: {term}\n"
+            f"- Type: {book_type}\n\n"
+            f"Please output a JSON object with exactly the following keys:\n"
+            f"- \"arT\": The book title localized in Arabic\n"
+            f"- \"enT\": The book title localized/translated in English\n"
+            f"- \"arSub\": A natural Arabic subtitle incorporating the stage, grade, term, and type\n"
+            f"- \"enSub\": A natural English subtitle incorporating the stage, grade, term, and type\n"
+            f"- \"arStage\": The school stage localized in Arabic\n"
+            f"- \"enStage\": The school stage localized/translated in English\n"
+            f"- \"arGrade\": The grade localized in Arabic\n"
+            f"- \"enGrade\": The grade localized/translated in English\n"
+            f"- \"arTerm\": The term/semester localized in Arabic\n"
+            f"- \"enTerm\": The term/semester localized/translated in English\n"
+            f"- \"arType\": The book type (e.g. Student Book) localized in Arabic\n"
+            f"- \"enType\": The book type localized/translated in English\n"
+            f"- \"arSubject\": The subject localized in Arabic\n"
+            f"- \"enSubject\": The subject localized/translated in English\n\n"
+            f"Ensure the output is valid JSON."
+        )
+        
+        # Default/fallback values
+        fallback = {
+            "arT": title,
+            "enT": title,
+            "arSub": f"{stage} - {grade} - {term} - {book_type}".strip(" -"),
+            "enSub": f"{stage} - {grade} - {term} - {book_type}".strip(" -"),
+            "arStage": stage,
+            "enStage": stage,
+            "arGrade": grade,
+            "enGrade": grade,
+            "arTerm": term,
+            "enTerm": term,
+            "arType": book_type,
+            "enType": book_type,
+            "arSubject": subject,
+            "enSubject": subject
+        }
+        
+        try:
+            response = await self.client.aio.models.generate_content(
+                model="gemini-3.1-flash-lite",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json"
+                )
+            )
+            text = response.text or ""
+            data = json.loads(text.strip())
+            return {
+                "arT": _sanitize_text(data.get("arT", fallback["arT"])),
+                "enT": _sanitize_text(data.get("enT", fallback["enT"])),
+                "arSub": _sanitize_text(data.get("arSub", fallback["arSub"])),
+                "enSub": _sanitize_text(data.get("enSub", fallback["enSub"])),
+                "arStage": _sanitize_text(data.get("arStage", fallback["arStage"])),
+                "enStage": _sanitize_text(data.get("enStage", fallback["enStage"])),
+                "arGrade": _sanitize_text(data.get("arGrade", fallback["arGrade"])),
+                "enGrade": _sanitize_text(data.get("enGrade", fallback["enGrade"])),
+                "arTerm": _sanitize_text(data.get("arTerm", fallback["arTerm"])),
+                "enTerm": _sanitize_text(data.get("enTerm", fallback["enTerm"])),
+                "arType": _sanitize_text(data.get("arType", fallback["arType"])),
+                "enType": _sanitize_text(data.get("enType", fallback["enType"])),
+                "arSubject": _sanitize_text(data.get("arSubject", fallback["arSubject"])),
+                "enSubject": _sanitize_text(data.get("enSubject", fallback["enSubject"]))
+            }
+        except Exception as e:
+            print(f"[Indexer] Localization metadata generation failed: {e}. Using fallback values.")
+            return fallback
 
     def upload_pdf(self, pdf_bytes: bytes, destination_blob: str) -> str:
         """Upload raw PDF bytes to Google Cloud Storage."""
@@ -90,9 +175,12 @@ class StorageIndexerAgent:
         """
         print(f"[Indexer] Starting Firestore indexing for book {book_id}...")
         
-        # 1. Sanitize pages
+        # 1. Sanitize and truncate pages
         for p in formatted_pages:
-            p["text"] = _sanitize_text(p.get("text", ""))
+            t = _sanitize_text(p.get("text", ""))
+            if len(t) > 150000:
+                t = t[:150000] + "\n\n...[Content Truncated due to Firestore Size Limits]..."
+            p["text"] = t
 
         # 2. Assemble main lean book doc
         title = _sanitize_text(metadata.get("title", "Unknown Book"))
@@ -106,6 +194,9 @@ class StorageIndexerAgent:
         gov_url = metadata.get("govUrl", "")
         gcs_uri = metadata.get("gcsUri", "")
         chapters = metadata.get("chapters", [])
+        
+        # Get localized metadata
+        localized = await self._get_localized_metadata(metadata)
         
         book_doc = {
             "id": book_id,
@@ -121,14 +212,16 @@ class StorageIndexerAgent:
             "storagePath": gcs_uri,
             "chapters": chapters,
             "pages": len(formatted_pages),
-            "status": "indexed",
+            "status": "indexing",
             "createdAt": firestore.SERVER_TIMESTAMP,
             "updatedAt": firestore.SERVER_TIMESTAMP,
+            **localized
         }
 
         # Write to main books collection
         print(f"[Indexer] Writing books/{book_id} lean metadata...")
-        self.db.collection("books").document(book_id).set(book_doc)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, lambda: self.db.collection("books").document(book_id).set(book_doc))
 
         # 3. Write joined full rich text to content/full
         consolidated_pages = [
@@ -146,14 +239,32 @@ class StorageIndexerAgent:
 
         try:
             print(f"[Indexer] Writing books/{book_id}/content/full document...")
-            self.db.collection("books").document(book_id).collection("content").document("full").set(content_payload)
+            await loop.run_in_executor(
+                None,
+                lambda: self.db.collection("books").document(book_id).collection("content").document("full").set(content_payload)
+            )
         except Exception as e:
-            print(f"[Indexer] Full joined document write failed (>1 MiB limit): {e}. Writing pagesList only...")
-            self.db.collection("books").document(book_id).collection("content").document("full").set({
-                "bookId": book_id,
-                "pagesList": formatted_pages,
-                "updatedAt": firestore.SERVER_TIMESTAMP
-            })
+            print(f"[Indexer] Full joined document write failed (>1 MiB limit): {e}. Trying write with pagesList only...")
+            try:
+                await loop.run_in_executor(
+                    None,
+                    lambda: self.db.collection("books").document(book_id).collection("content").document("full").set({
+                        "bookId": book_id,
+                        "pagesList": formatted_pages,
+                        "updatedAt": firestore.SERVER_TIMESTAMP
+                    })
+                )
+            except Exception as e2:
+                print(f"[Indexer] PagesList joined document write failed as well: {e2}. Writing pagesList: [] as fallback...")
+                await loop.run_in_executor(
+                    None,
+                    lambda: self.db.collection("books").document(book_id).collection("content").document("full").set({
+                        "bookId": book_id,
+                        "pagesList": [],
+                        "text": "",
+                        "updatedAt": firestore.SERVER_TIMESTAMP
+                    })
+                )
 
         # 4. Generate embeddings in parallel
         print(f"[Indexer] Generating page embeddings in parallel for {len(formatted_pages)} pages...")
@@ -191,6 +302,9 @@ class StorageIndexerAgent:
                 p_text = p.get("text", "")
                 emb_vector = embeddings_map.get(p_num, [0.0] * EMBEDDING_DIM)
                 
+                import struct
+                emb_bytes = struct.pack(f"{len(emb_vector)}f", *emb_vector)
+                
                 page_ref = self.db.collection("books").document(book_id).collection("pages").document(f"page_{p_num}")
                 batch.set(page_ref, {
                     "pageNumber": p_num,
@@ -204,13 +318,29 @@ class StorageIndexerAgent:
                     "type": book_type,
                     "language": language,
                     "year": year,
-                    "embedding": emb_vector
+                    "embedding": emb_bytes,
+                    "arStage": localized.get("arStage", stage),
+                    "enStage": localized.get("enStage", stage),
+                    "arGrade": localized.get("arGrade", grade),
+                    "enGrade": localized.get("enGrade", grade),
+                    "arTerm": localized.get("arTerm", term),
+                    "enTerm": localized.get("enTerm", term),
+                    "arType": localized.get("arType", book_type),
+                    "enType": localized.get("enType", book_type),
+                    "arSubject": localized.get("arSubject", subject),
+                    "enSubject": localized.get("enSubject", subject)
                 })
             await loop.run_in_executor(None, batch.commit)
             chunk_count += 1
             if progress_callback and total_chunks > 0:
                 current_prog = 91 + int((chunk_count / total_chunks) * 8)
                 await progress_callback(current_prog)
+
+        print(f"[Indexer] Finalizing status to indexed for book: {book_id}")
+        await loop.run_in_executor(None, lambda: self.db.collection("books").document(book_id).update({
+            "status": "indexed",
+            "updatedAt": firestore.SERVER_TIMESTAMP
+        }))
 
         print(f"[Indexer] Finished indexing book: {book_id}")
         return {

@@ -10,7 +10,8 @@ export const SUBJECT_META: Record<SubjectId, { ar: string; en: string; hue: HueI
   math:       { ar: 'رياضيات',       en: 'Math',        hue: 'cyan',   glyph: '∑' },
   geology:    { ar: 'جيولوجيا',     en: 'Geology',     hue: 'stone',  glyph: '🪨' },
   philosophy: { ar: 'فلسفة',         en: 'Philosophy',  hue: 'fuchsia', glyph: '💭' },
-  geography:  { ar: 'جغرافيا',       en: 'Geography',   hue: 'teal',   glyph: '🌍' }
+  geography:  { ar: 'جغرافيا',       en: 'Geography',   hue: 'teal',   glyph: '🌍' },
+  science:    { ar: 'علوم',         en: 'Science',     hue: 'teal',   glyph: '🧪' }
 };
 
 export type HueId =

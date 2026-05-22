@@ -29,6 +29,38 @@ class CrawlerAgent:
                 return True
         return False
 
+    def _is_school_education(self, item: Dict[str, Any]) -> bool:
+        stage = item.get("stage", "").strip()
+        grade = item.get("grade", "").strip()
+        subject = item.get("subject", "").strip()
+        source_dir = item.get("source_dir", "").strip()
+        link = item.get("link", "").strip()
+        
+        # Textual indicators for kindergarten / preschool and community education
+        exclude_patterns = [
+            r'\bkg\b',
+            r'kindergarten',
+            r'رياض[\s_]الاطفال',
+            r'رياض[\s_]الأطفال',
+            r'مستوى[\s_]أول',
+            r'مستوي[\s_]أول',
+            r'مستوى[\s_]ثان',
+            r'مستوي[\s_]ثان',
+            r'تمهيدي',
+            r'\bkg1\b',
+            r'\bkg2\b',
+            r'تعليم[\s_]مجتمعي',
+            r'تعليم[\s_]المجتمع',
+            r'community[\s_]education'
+        ]
+        
+        combined_text = f"{stage} {grade} {subject} {source_dir} {link}".lower()
+        for pattern in exclude_patterns:
+            if re.search(pattern, combined_text):
+                return False
+                
+        return True
+
     def _clean_and_resolve_url(self, link: str, parent_url: str) -> str:
         # Strip whitespace, newlines, etc.
         cleaned = link.strip().replace(" ", "").replace("\n", "").replace("\r", "")
@@ -58,7 +90,7 @@ class CrawlerAgent:
                             resolved_link = self._clean_and_resolve_url(link, url)
                             if self._is_blacklisted(resolved_link):
                                 continue
-                            items.append({
+                            candidate = {
                                 "stage": item.get("stage", "").strip(),
                                 "grade": item.get("grade", "").strip(),
                                 "term": item.get("term", "").strip(),
@@ -66,7 +98,10 @@ class CrawlerAgent:
                                 "type": item.get("type", "").strip(),
                                 "link": resolved_link,
                                 "source_dir": dir_path
-                            })
+                            }
+                            if not self._is_school_education(candidate):
+                                continue
+                            items.append(candidate)
                         print(f"[Crawler] Directory {dir_path}: Found {len(items)} items in books.json")
                         return items
         except Exception as e:
@@ -94,7 +129,7 @@ class CrawlerAgent:
                                 continue
                             # If it's a sub-directory, we will visit it, but if it ends with .pdf, it's a book
                             if resolved_link.lower().endswith(".pdf"):
-                                items.append({
+                                candidate = {
                                     "stage": dir_path.strip("/"),
                                     "grade": "General",
                                     "term": "General",
@@ -102,7 +137,9 @@ class CrawlerAgent:
                                     "type": link_text.strip(),
                                     "link": resolved_link,
                                     "source_dir": dir_path
-                                })
+                                }
+                                if self._is_school_education(candidate):
+                                    items.append(candidate)
                         print(f"[Crawler] Directory {dir_path}: Found {len(items)} PDF items in HTML infoCards")
         except Exception as e:
             print(f"[Crawler] failed to parse HTML for {url}: {e}")
@@ -112,12 +149,10 @@ class CrawlerAgent:
     async def run(self) -> List[Dict[str, Any]]:
         """Run crawling over all known curriculum/book directories."""
         directories = [
-            "books/",
             "sec3guideforms/",
-            "fany3guideforms/",
             "ExamSpecifications/",
             "cha/",
-            "fany_Exam_time_date/"
+            "books/"
         ]
         
         all_books = []
@@ -141,8 +176,17 @@ class CrawlerAgent:
             if os.path.exists(fallback_path):
                 try:
                     with open(fallback_path, "r", encoding="utf-8") as f:
-                        all_books = json.load(f)
-                    print(f"[Crawler] Successfully loaded {len(all_books)} books from fallback file.")
+                        fallback_data = json.load(f)
+                    # Filter fallback items to only include target directories
+                    for item in fallback_data:
+                        link = item.get("link")
+                        s_dir = item.get("source_dir")
+                        if link and s_dir in directories and link not in seen_links:
+                            if not self._is_school_education(item):
+                                continue
+                            seen_links.add(link)
+                            all_books.append(item)
+                    print(f"[Crawler] Successfully loaded and filtered {len(all_books)} books from fallback file.")
                 except Exception as e:
                     print(f"[Crawler] Failed to load fallback file: {e}")
                     

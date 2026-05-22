@@ -16,6 +16,7 @@ const SUBJECT_ALIASES: Array<[SubjectId, string[]]> = [
   ['physics', ['physics', 'phys', 'phy_', 'فيزياء', 'الفيزياء']],
   ['chemistry', ['chemistry', 'كيمياء', 'الكيمياء']],
   ['biology', ['biology', 'أحياء', 'احياء', 'الأحياء', 'الاحياء']],
+  ['science', ['science', 'علوم', 'العلوم', 'العلوم المشتركة', 'العلوم المتكاملة', 'integrated science']],
   ['arabic', ['arabic', 'عربي', 'العربية', 'اللغة العربية']],
   ['history', ['history', 'تاريخ', 'التاريخ']],
   ['english', ['english', 'انجليزي', 'إنجليزي', 'الانجليزية', 'الإنجليزية']],
@@ -73,6 +74,16 @@ export function bookFromFirestore(id: string, data: RawBookDoc): Book {
     errorMessage: text(data.errorMessage, ''),
     createdAtMs,
     updatedAtMs,
+    arStage: text(data.arStage, stage),
+    enStage: text(data.enStage, stage),
+    arGrade: text(data.arGrade, grade),
+    enGrade: text(data.enGrade, grade),
+    arTerm: text(data.arTerm, term),
+    enTerm: text(data.enTerm, term),
+    arType: text(data.arType, type),
+    enType: text(data.enType, type),
+    arSubject: text(data.arSubject, rawSubject),
+    enSubject: text(data.enSubject, rawSubject),
   };
 }
 
@@ -106,6 +117,14 @@ export function bookMatchesQuery(book: Book, query: string): boolean {
       book.grade,
       book.term,
       book.type,
+      book.arStage,
+      book.enStage,
+      book.arGrade,
+      book.enGrade,
+      book.arTerm,
+      book.enTerm,
+      book.arType,
+      book.enType,
       book.language,
       book.year,
     ].filter(Boolean).join(' ')
@@ -120,7 +139,7 @@ export function normalizeSubject(raw: string): SubjectId {
   for (const [id, aliases] of SUBJECT_ALIASES) {
     if (aliases.some((alias) => lowered.includes(normalize(alias)))) return id;
   }
-  if (lowered.includes('science') || lowered.includes('علوم')) return 'biology';
+  if (lowered.includes('science') || lowered.includes('علوم')) return 'science';
   if (lowered.includes('ict') || lowered.includes('تكنولوجيا')) return 'math';
   return 'geology';
 }

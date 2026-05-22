@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from typing import Dict, Any, Optional
 import sys
 import json
 import httpx
@@ -11,6 +12,8 @@ import re
 import urllib.parse
 from datetime import datetime, timezone
 import io
+import time
+import gc
 
 from google.adk.agents.llm_agent import Agent
 from google.cloud import firestore
@@ -29,7 +32,7 @@ try:
 except AttributeError:
     pass
 
-MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 GCS_BUCKET = os.getenv("GCS_BUCKET", "khsosy.firebasestorage.app")
 
 # Cleanup helpers for paths
@@ -135,20 +138,65 @@ async def run_sync_pipeline(
     
     logs = status_data.get("logs", [])
     
-    def append_log(text: str, status: str = "info") -> None:
+    status_lock = asyncio.Lock()
+
+    _cached_status = None
+    _cached_status_time = 0.0
+
+    def append_log_sync(text: str, status: str = "info") -> None:
+        """Helper to append log synchronously (only safe for sequential phase)."""
         logs.append({
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "text": text,
             "status": status,
             "agent": "IngestionOrchestrator"
         })
-        # Keep logs within last 120 lines
         if len(logs) > 120:
             logs.pop(0)
 
-    append_log("Sync pipeline started. Stage 1: Crawling website and discovering resources...", "info")
+    async def update_status_safe(updates: Dict[str, Any], log_text: Optional[str] = None, log_status: str = "info"):
+        nonlocal _cached_status, _cached_status_time
+        async with status_lock:
+            if log_text:
+                logs.append({
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "text": log_text,
+                    "status": log_status,
+                    "agent": "IngestionOrchestrator"
+                })
+                if len(logs) > 120:
+                    logs.pop(0)
+            if "logs" not in updates:
+                updates["logs"] = logs
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, lambda: status_ref.update(updates))
+            _cached_status = None
+            _cached_status_time = 0.0
+
+    async def get_status_safe() -> Dict[str, Any]:
+        async with status_lock:
+            loop = asyncio.get_running_loop()
+            status_doc = await loop.run_in_executor(None, status_ref.get)
+            return status_doc.to_dict() or {}
+
+    async def get_status_safe_cached() -> Dict[str, Any]:
+        nonlocal _cached_status, _cached_status_time
+        now = time.time()
+        if _cached_status is not None and (now - _cached_status_time) < 5.0:
+            return _cached_status
+        async with status_lock:
+            now = time.time()
+            if _cached_status is not None and (now - _cached_status_time) < 5.0:
+                return _cached_status
+            loop = asyncio.get_running_loop()
+            status_doc = await loop.run_in_executor(None, status_ref.get)
+            _cached_status = status_doc.to_dict() or {}
+            _cached_status_time = now
+            return _cached_status
+
+    append_log_sync("Sync pipeline started. Stage 1: Crawling website and discovering resources...", "info")
     
-    # 1. Update status to 'running'
+    # 1. Update status to 'running' and clear old booksList to prevent size errors
     status_ref.set({
         "status": "running",
         "pausedByRequest": False,
@@ -169,41 +217,36 @@ async def run_sync_pipeline(
         "percentage": 0.0,
         "activeBookId": "",
         "activeBookTitle": "",
-        "booksList": status_data.get("booksList", {}),
+        "booksList": {},
         "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
         "executionName": status_data.get("executionName", ""),
-    }, merge=True)
+    }, merge=False)
 
     try:
         # Step 1: Crawl Books
         crawler = CrawlerAgent()
         catalog = await crawler.run()
         total_books = len(catalog)
-        append_log(f"Crawler discovered {total_books} unique book/PDF resources.", "ok")
         
-        status_ref.update({
+        await update_status_safe({
             "tasks.crawler.status": "completed",
-            "tasks.crawler.progress": 100,
-            "logs": logs
-        })
+            "tasks.crawler.progress": 100
+        }, log_text=f"Crawler discovered {total_books} unique book/PDF resources.", log_status="ok")
 
         # Step 2: Scrape Videos
-        append_log("Stage 2: Scraping and indexing educational videos...", "info")
-        status_ref.update({
+        await update_status_safe({
             "tasks.video_extractor.status": "running",
             "tasks.video_extractor.progress": 30,
             "progressMessage": "Scraping videos..."
-        })
+        }, log_text="Stage 2: Scraping and indexing educational videos...", log_status="info")
         
         video_extractor = VideoExtractorAgent(db)
         videos_extracted = await video_extractor.run()
-        append_log(f"Video Extractor saved {len(videos_extracted)} educational videos to Firestore.", "ok")
         
-        status_ref.update({
+        await update_status_safe({
             "tasks.video_extractor.status": "completed",
-            "tasks.video_extractor.progress": 100,
-            "logs": logs
-        })
+            "tasks.video_extractor.progress": 100
+        }, log_text=f"Video Extractor saved {len(videos_extracted)} educational videos to Firestore.", log_status="ok")
 
         # Step 3: Initialize granular tasks for all books
         total_tasks = total_books + 2
@@ -213,13 +256,13 @@ async def run_sync_pipeline(
         }
         
         # Load existing indexed books to support resuming
-        indexed_book_ids = set()
-        for doc in db.collection("books").stream():
-            data = doc.to_dict() or {}
-            if data.get("status") == "indexed" and (data.get("pages") or 0) > 0:
-                indexed_book_ids.add(doc.id)
+        loop = asyncio.get_running_loop()
+        def get_indexed_books():
+            docs = db.collection("books").where("status", "==", "indexed").stream()
+            return {doc.id for doc in docs if (doc.to_dict() or {}).get("pages", 0) > 0}
+        indexed_book_ids = await loop.run_in_executor(None, get_indexed_books)
 
-        legacy_books_list = status_data.get("booksList", {})
+        legacy_books_list = {}
         
         for idx, book in enumerate(catalog):
             gov_url = book["link"]
@@ -257,7 +300,8 @@ async def run_sync_pipeline(
         progress_percentage = int((completed_tasks / total_tasks) * 100)
 
         filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
-        status_ref.update({
+        
+        await update_status_safe({
             "totalTasks": total_tasks,
             "completedTasks": completed_tasks,
             "progressPercentage": progress_percentage,
@@ -267,12 +311,9 @@ async def run_sync_pipeline(
             "downloadedBooks": len([b for b in legacy_books_list.values() if b.get("status") == "completed"]),
             "parsedBooks": len([b for b in legacy_books_list.values() if b.get("status") == "completed"]),
             "percentage": float(progress_percentage),
-            "booksList": filtered_books,
-            "logs": logs
+            "booksList": filtered_books
         })
 
-        # Concurrency limit for running parallel book ingestion pipelines
-        semaphore = asyncio.Semaphore(3)
         indexer = StorageIndexerAgent(db, storage_client, bucket_name)
         counter_agent = PageCounterAgent()
         formatter_agent = BookFormatterAgent()
@@ -285,7 +326,7 @@ async def run_sync_pipeline(
             task_key = f"book_{b_id}"
 
             # Check if user requested pause
-            curr_status = status_ref.get().to_dict() or {}
+            curr_status = await get_status_safe_cached()
             if curr_status.get("pausedByRequest") or curr_status.get("status") == "paused":
                 return
 
@@ -294,43 +335,54 @@ async def run_sync_pipeline(
                 return
 
             # Update book progress to running
-            tasks_map[task_key]["status"] = "running"
-            tasks_map[task_key]["progress"] = 10
-            legacy_books_list[b_id]["status"] = "downloading"
-            legacy_books_list[b_id]["progress"] = 10
-            
-            append_log(f"Processing book {book_idx+1}/{total_books}: {b_title} ({grade})", "info")
-            
-            filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
-            status_ref.update({
-                "activeBookId": b_id,
-                "activeBookTitle": b_title,
-                "progressMessage": f"Downloading {b_title}...",
-                "tasks": filtered_tasks,
-                "booksList": filtered_books,
-                "logs": logs,
-                "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
-            })
+            async with status_lock:
+                tasks_map[task_key]["status"] = "running"
+                tasks_map[task_key]["progress"] = 10
+                legacy_books_list[b_id]["status"] = "downloading"
+                legacy_books_list[b_id]["progress"] = 10
+                
+                logs.append({
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "text": f"Processing book {book_idx+1}/{total_books}: {b_title} ({grade})",
+                    "status": "info",
+                    "agent": "IngestionOrchestrator"
+                })
+                if len(logs) > 120:
+                    logs.pop(0)
+                
+                filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, lambda: status_ref.update({
+                    "activeBookId": b_id,
+                    "activeBookTitle": b_title,
+                    "progressMessage": f"Downloading {b_title}...",
+                    "tasks": filtered_tasks,
+                    "booksList": filtered_books,
+                    "logs": logs,
+                    "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
+                }))
 
             try:
                 # 1. Download PDF
                 pdf_bytes = await download_pdf(gov_url)
                 
                 # Check for pause
-                curr_status = status_ref.get().to_dict() or {}
+                curr_status = await get_status_safe_cached()
                 if curr_status.get("pausedByRequest") or curr_status.get("status") == "paused":
                     return
 
-                tasks_map[task_key]["progress"] = 30
-                legacy_books_list[b_id]["status"] = "counting"
-                legacy_books_list[b_id]["progress"] = 30
-                filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
-                status_ref.update({
-                    "progressMessage": f"Analyzing pages & chapters for {b_title}...",
-                    "tasks": filtered_tasks,
-                    "booksList": filtered_books,
-                    "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
-                })
+                async with status_lock:
+                    tasks_map[task_key]["progress"] = 30
+                    legacy_books_list[b_id]["status"] = "counting"
+                    legacy_books_list[b_id]["progress"] = 30
+                    filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(None, lambda: status_ref.update({
+                        "progressMessage": f"Analyzing pages & chapters for {b_title}...",
+                        "tasks": filtered_tasks,
+                        "booksList": filtered_books,
+                        "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
+                    }))
 
                 # 2. Count pages & extract chapters
                 count_results = await counter_agent.get_page_count_and_chapters(pdf_bytes)
@@ -338,20 +390,22 @@ async def run_sync_pipeline(
                 chapters_list = count_results.get("chapters", [])
                 
                 # Check for pause
-                curr_status = status_ref.get().to_dict() or {}
+                curr_status = await get_status_safe_cached()
                 if curr_status.get("pausedByRequest") or curr_status.get("status") == "paused":
                     return
 
-                tasks_map[task_key]["progress"] = 40
-                legacy_books_list[b_id]["status"] = "uploading"
-                legacy_books_list[b_id]["progress"] = 40
-                filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
-                status_ref.update({
-                    "progressMessage": f"Uploading original PDF: {b_title}...",
-                    "tasks": filtered_tasks,
-                    "booksList": filtered_books,
-                    "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
-                })
+                async with status_lock:
+                    tasks_map[task_key]["progress"] = 40
+                    legacy_books_list[b_id]["status"] = "uploading"
+                    legacy_books_list[b_id]["progress"] = 40
+                    filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(None, lambda: status_ref.update({
+                        "progressMessage": f"Uploading original PDF: {b_title}...",
+                        "tasks": filtered_tasks,
+                        "booksList": filtered_books,
+                        "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
+                    }))
 
                 # 3. Upload to GCS
                 stage_c = clean_path_segment(book_data.get("stage", "Other"))
@@ -366,23 +420,26 @@ async def run_sync_pipeline(
                 filename = clean_path_segment(filename)
                 destination_blob = f"moe-textbooks/{stage_c}/{grade_c}/{term_c}/{sub_c}/{type_c}/{filename}"
                 
-                gcs_uri = indexer.upload_pdf(pdf_bytes, destination_blob)
+                loop = asyncio.get_running_loop()
+                gcs_uri = await loop.run_in_executor(None, indexer.upload_pdf, pdf_bytes, destination_blob)
 
                 # Check for pause
-                curr_status = status_ref.get().to_dict() or {}
+                curr_status = await get_status_safe_cached()
                 if curr_status.get("pausedByRequest") or curr_status.get("status") == "paused":
                     return
 
-                tasks_map[task_key]["progress"] = 50
-                legacy_books_list[b_id]["status"] = "parsing"
-                legacy_books_list[b_id]["progress"] = 50
-                filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
-                status_ref.update({
-                    "progressMessage": f"Formatting {total_pages} pages for {b_title}...",
-                    "tasks": filtered_tasks,
-                    "booksList": filtered_books,
-                    "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
-                })
+                async with status_lock:
+                    tasks_map[task_key]["progress"] = 50
+                    legacy_books_list[b_id]["status"] = "parsing"
+                    legacy_books_list[b_id]["progress"] = 50
+                    filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(None, lambda: status_ref.update({
+                        "progressMessage": f"Formatting {total_pages} pages for {b_title}...",
+                        "tasks": filtered_tasks,
+                        "booksList": filtered_books,
+                        "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
+                    }))
 
                 # 4. Split PDF locally and format each page in parallel
                 reader = PdfReader(io.BytesIO(pdf_bytes))
@@ -397,23 +454,26 @@ async def run_sync_pipeline(
                     page_bytes = page_io.getvalue()
                     page_data_list.append((p_idx + 1, page_bytes))
 
+                page_semaphore = asyncio.Semaphore(5)
                 completed_count = 0
                 async def format_and_track(page_num, page_bytes):
                     nonlocal completed_count
-                    res = await formatter_agent.format_single_page(page_num, page_bytes, semaphore)
-                    completed_count += 1
-                    if total_pages > 0:
-                        prog = 50 + int((completed_count / total_pages) * 30)
-                        if completed_count == total_pages or completed_count % max(1, total_pages // 10) == 0:
-                            tasks_map[task_key]["progress"] = prog
-                            legacy_books_list[b_id]["progress"] = prog
-                            filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
-                            status_ref.update({
-                                "progressMessage": f"Formatting page {completed_count}/{total_pages} for {b_title}...",
-                                "tasks": filtered_tasks,
-                                "booksList": filtered_books,
-                                "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
-                            })
+                    res = await formatter_agent.format_single_page(page_num, page_bytes, page_semaphore)
+                    async with status_lock:
+                        completed_count += 1
+                        if total_pages > 0:
+                            prog = 50 + int((completed_count / total_pages) * 30)
+                            if completed_count == total_pages or completed_count % max(1, total_pages // 10) == 0:
+                                tasks_map[task_key]["progress"] = prog
+                                legacy_books_list[b_id]["progress"] = prog
+                                filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
+                                loop = asyncio.get_running_loop()
+                                await loop.run_in_executor(None, lambda: status_ref.update({
+                                    "progressMessage": f"Formatting page {completed_count}/{total_pages} for {b_title}...",
+                                    "tasks": filtered_tasks,
+                                    "booksList": filtered_books,
+                                    "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
+                                }))
                     return res
 
                 page_tasks = [format_and_track(p_num, p_bytes) for p_num, p_bytes in page_data_list]
@@ -421,20 +481,22 @@ async def run_sync_pipeline(
                 formatted_pages.sort(key=lambda x: x["pageNumber"])
 
                 # Check for pause
-                curr_status = status_ref.get().to_dict() or {}
+                curr_status = await get_status_safe_cached()
                 if curr_status.get("pausedByRequest") or curr_status.get("status") == "paused":
                     return
 
-                tasks_map[task_key]["progress"] = 80
-                legacy_books_list[b_id]["status"] = "indexing"
-                legacy_books_list[b_id]["progress"] = 80
-                filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
-                status_ref.update({
-                    "progressMessage": f"Indexing full document and generating search embeddings...",
-                    "tasks": filtered_tasks,
-                    "booksList": filtered_books,
-                    "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
-                })
+                async with status_lock:
+                    tasks_map[task_key]["progress"] = 80
+                    legacy_books_list[b_id]["status"] = "indexing"
+                    legacy_books_list[b_id]["progress"] = 80
+                    filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
+                    loop = asyncio.get_running_loop()
+                    await loop.run_in_executor(None, lambda: status_ref.update({
+                        "progressMessage": f"Indexing full document and generating search embeddings...",
+                        "tasks": filtered_tasks,
+                        "booksList": filtered_books,
+                        "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
+                    }))
 
                 # 5. Index to Firestore
                 lang_code = "ar"
@@ -463,97 +525,164 @@ async def run_sync_pipeline(
                 }
                 
                 async def index_progress_callback(prog_val: int):
-                    tasks_map[task_key]["progress"] = prog_val
-                    legacy_books_list[b_id]["progress"] = prog_val
-                    filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
-                    status_ref.update({
-                        "progressMessage": f"Indexing and generating search embeddings ({prog_val}%)...",
-                        "tasks": filtered_tasks,
-                        "booksList": filtered_books,
-                        "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
-                    })
+                    async with status_lock:
+                        tasks_map[task_key]["progress"] = prog_val
+                        legacy_books_list[b_id]["progress"] = prog_val
+                        filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
+                        loop = asyncio.get_running_loop()
+                        await loop.run_in_executor(None, lambda: status_ref.update({
+                            "progressMessage": f"Indexing and generating search embeddings ({prog_val}%)...",
+                            "tasks": filtered_tasks,
+                            "booksList": filtered_books,
+                            "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
+                        }))
 
                 await indexer.index_book(b_id, book_metadata, formatted_pages, progress_callback=index_progress_callback)
 
                 # Completed!
-                tasks_map[task_key]["status"] = "completed"
-                tasks_map[task_key]["progress"] = 100
-                legacy_books_list[b_id]["status"] = "completed"
-                legacy_books_list[b_id]["progress"] = 100
-                
-                append_log(f"Successfully processed and indexed: {b_title}!", "ok")
-                
-                # Fetch fresh status to update stats
-                curr_status = status_ref.get().to_dict() or {}
-                completed_count = len([t for t in tasks_map.values() if t["status"] == "completed"])
-                progress_percentage = int((completed_count / total_tasks) * 100)
-                total_pages_processed = curr_status.get("totalPagesProcessed", 0) + total_pages
+                async with status_lock:
+                    tasks_map[task_key]["status"] = "completed"
+                    tasks_map[task_key]["progress"] = 100
+                    legacy_books_list[b_id]["status"] = "completed"
+                    legacy_books_list[b_id]["progress"] = 100
+                    
+                    logs.append({
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "text": f"Successfully processed and indexed: {b_title}!",
+                        "status": "ok",
+                        "agent": "IngestionOrchestrator"
+                    })
+                    if len(logs) > 120:
+                        logs.pop(0)
+                    
+                    # Fetch fresh status to update stats
+                    loop = asyncio.get_running_loop()
+                    curr_status_doc = await loop.run_in_executor(None, status_ref.get)
+                    curr_status = curr_status_doc.to_dict() or {}
+                    completed_count = len([t for t in tasks_map.values() if t["status"] == "completed"])
+                    progress_percentage = int((completed_count / total_tasks) * 100)
+                    total_pages_processed = curr_status.get("totalPagesProcessed", 0) + total_pages
 
-                filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
-                status_ref.update({
-                    "completedTasks": completed_count,
-                    "progressPercentage": progress_percentage,
-                    "downloadedBooks": len([b for b in legacy_books_list.values() if b.get("status") == "completed"]),
-                    "parsedBooks": len([b for b in legacy_books_list.values() if b.get("status") == "completed"]),
-                    "totalPagesProcessed": total_pages_processed,
-                    "percentage": float(progress_percentage),
-                    "tasks": filtered_tasks,
-                    "booksList": filtered_books,
-                    "logs": logs,
-                    "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
-                })
+                    filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
+                    await loop.run_in_executor(None, lambda: status_ref.update({
+                        "completedTasks": completed_count,
+                        "progressPercentage": progress_percentage,
+                        "downloadedBooks": len([b for b in legacy_books_list.values() if b.get("status") == "completed"]),
+                        "parsedBooks": len([b for b in legacy_books_list.values() if b.get("status") == "completed"]),
+                        "totalPagesProcessed": total_pages_processed,
+                        "percentage": float(progress_percentage),
+                        "tasks": filtered_tasks,
+                        "booksList": filtered_books,
+                        "logs": logs,
+                        "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
+                    }))
 
             except Exception as e:
-                append_log(f"Failed to process book {b_title}: {e}", "error")
-                tasks_map[task_key]["status"] = "failed"
-                tasks_map[task_key]["progress"] = 0
-                tasks_map[task_key]["errorMessage"] = str(e)
-                legacy_books_list[b_id]["status"] = "failed"
-                legacy_books_list[b_id]["progress"] = 0
-                
-                filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
-                status_ref.update({
-                    "tasks": filtered_tasks,
-                    "booksList": filtered_books,
-                    "logs": logs,
-                    "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
-                })
+                async with status_lock:
+                    logs.append({
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "text": f"Failed to process book {b_title}: {e}",
+                        "status": "error",
+                        "agent": "IngestionOrchestrator"
+                    })
+                    if len(logs) > 120:
+                        logs.pop(0)
+                    tasks_map[task_key]["status"] = "failed"
+                    tasks_map[task_key]["progress"] = 0
+                    tasks_map[task_key]["errorMessage"] = str(e)
+                    legacy_books_list[b_id]["status"] = "failed"
+                    legacy_books_list[b_id]["progress"] = 0
+                    
+                    filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
+                    loop = asyncio.get_running_loop()
+                    def _update_firestore_on_error():
+                        # Update status document
+                        status_ref.update({
+                            "tasks": filtered_tasks,
+                            "booksList": filtered_books,
+                            "logs": logs,
+                            "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
+                        })
+                        # Update specific book document to failed
+                        db.collection("books").document(b_id).set({
+                            "id": b_id,
+                            "title": b_title,
+                            "stage": book_data.get("stage", ""),
+                            "grade": grade,
+                            "term": book_data.get("term", ""),
+                            "subject": book_data.get("subject", ""),
+                            "type": book_data.get("type", "Student Book"),
+                            "govUrl": gov_url,
+                            "status": "failed",
+                            "errorMessage": str(e),
+                            "updatedAt": firestore.SERVER_TIMESTAMP
+                        }, merge=True)
+                    await loop.run_in_executor(None, _update_firestore_on_error)
 
-        # Process books sequentially (or we can run them in a restricted concurrent worker queue)
-        # We will use sequential loop or light parallel gathering. Since each book formats pages in parallel,
-        # processing books sequentially is actually very fast and prevents hitting Gemini rate limits.
-        # Let's process books sequentially.
+        # Queue-based execution pool limit to 3 books in parallel.
+        # This keeps memory down and handles resume skipping instantly without I/O.
+        queue = asyncio.Queue()
         for idx, book_data in enumerate(catalog):
-            curr_status = status_ref.get().to_dict() or {}
-            if curr_status.get("pausedByRequest") or curr_status.get("status") == "paused":
-                append_log("Sync pipeline paused by user request.", "warn")
-                status_ref.update({
-                    "status": "paused",
-                    "logs": logs,
-                    "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
-                })
-                return
-            await process_single_book(idx, book_data)
+            await queue.put((idx, book_data))
+
+        async def worker_loop():
+            while not queue.empty():
+                try:
+                    idx, book_data = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+
+                gov_url = book_data["link"]
+                b_id = get_book_id(gov_url, book_data.get("subject", "book"))
+                
+                # Check skip condition BEFORE doing any Firestore reads
+                if b_id in indexed_book_ids:
+                    queue.task_done()
+                    continue
+
+                # Check pause status using cached status to avoid hitting rate limits
+                curr_status = await get_status_safe_cached()
+                if curr_status.get("pausedByRequest") or curr_status.get("status") == "paused":
+                    queue.task_done()
+                    break
+
+                try:
+                    await process_single_book(idx, book_data)
+                except Exception as ex:
+                    print(f"Error in worker_loop processing book {idx}: {ex}")
+                finally:
+                    # Clean up memory aggressively
+                    gc.collect()
+                    queue.task_done()
+
+        # Run exactly 3 worker tasks in parallel
+        worker_tasks = [asyncio.create_task(worker_loop()) for _ in range(3)]
+        await asyncio.gather(*worker_tasks)
+
+        # Check final status
+        final_status = await get_status_safe()
+        if final_status.get("pausedByRequest") or final_status.get("status") == "paused":
+            await update_status_safe({
+                "status": "paused",
+                "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
+            }, log_text="Sync pipeline paused by user request.", log_status="warn")
+            return
 
         # Mark final status as completed
-        append_log("Multi-Agent Textbook Sync completed successfully!", "ok")
-        status_ref.update({
+        await update_status_safe({
             "status": "completed",
             "activeBookId": "",
             "activeBookTitle": "",
             "progressMessage": "",
-            "logs": logs,
             "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
-        })
+        }, log_text="Multi-Agent Textbook Sync completed successfully!", log_status="ok")
 
     except Exception as general_err:
-        append_log(f"Sync pipeline failed with error: {general_err}", "error")
-        status_ref.update({
+        await update_status_safe({
             "status": "error",
-            "logs": logs,
             "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
             "errorMessage": str(general_err)[:500]
-        })
+        }, log_text=f"Sync pipeline failed with error: {general_err}", log_status="error")
 
 # Define the ADK Agent (legacy compatibility, though we run via sync_job_main.py)
 INSTRUCTION = """\
