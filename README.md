@@ -1,6 +1,6 @@
 # 5sosy — خصوصي
 
-Autonomous AI study assistant for Egyptian **Thanaweya Amma** students.
+Autonomous AI study assistant for Egyptian school students.
 Submission for the **Google for Startups AI Agents Challenge 2026, Track 1**.
 
 5sosy ingests Ministry-of-Education textbooks and orchestrates a 5-agent
