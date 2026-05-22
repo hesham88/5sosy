@@ -56,7 +56,7 @@ export function bookFromFirestore(id: string, data: RawBookDoc): Book {
     enSub: text(data.enSub, subtitle),
     publisher,
     year,
-    chapters: number(data.chapters, 0),
+    chapters: Array.isArray(data.chapters) ? data.chapters.length : number(data.chapters, 0),
     pages: number(data.pages, Array.isArray(data.pagesList) ? data.pagesList.length : 0),
     status,
     mastery: masteryValue(data.mastery),

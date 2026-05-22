@@ -6,7 +6,7 @@ import sys
 import json
 import asyncio
 import hashlib
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Callable, Awaitable
 from google import genai
 from google.cloud import firestore
 from google.cloud import storage
@@ -74,7 +74,8 @@ class StorageIndexerAgent:
         self,
         book_id: str,
         metadata: Dict[str, Any],
-        formatted_pages: List[Dict[str, Any]]
+        formatted_pages: List[Dict[str, Any]],
+        progress_callback: Optional[Callable[[int], Awaitable[None]]] = None
     ) -> Dict[str, Any]:
         """Index textbook metadata, full content, and page-level embeddings in Firestore.
 
@@ -82,6 +83,7 @@ class StorageIndexerAgent:
             book_id: Unique book ID.
             metadata: Book metadata properties.
             formatted_pages: List of formatted page dicts: [{'pageNumber': N, 'text': '...'}]
+            progress_callback: Optional async callback to report progress percentage.
 
         Returns:
             Dict summarizing indexing results.
@@ -157,21 +159,30 @@ class StorageIndexerAgent:
         print(f"[Indexer] Generating page embeddings in parallel for {len(formatted_pages)} pages...")
         embed_semaphore = asyncio.Semaphore(10)
         
+        embed_completed = 0
         async def embed_single_page(p):
+            nonlocal embed_completed
             p_num = p.get("pageNumber")
             p_text = p.get("text", "")
             emb = await self._embed_with_retry(p_text)
+            embed_completed += 1
+            if progress_callback and len(formatted_pages) > 0:
+                current_prog = 80 + int((embed_completed / len(formatted_pages)) * 11)
+                if embed_completed == len(formatted_pages) or embed_completed % max(1, len(formatted_pages) // 10) == 0:
+                    await progress_callback(current_prog)
             return p_num, emb
 
         embed_tasks = [embed_single_page(p) for p in formatted_pages]
         embed_results = await asyncio.gather(*embed_tasks)
         embeddings_map = {p_num: emb for p_num, emb in embed_results}
 
-        # 5. Write page documents in batches of 400
+        # 5. Write page documents in batches of 20
         print(f"[Indexer] Writing page subcollections in batches...")
         loop = asyncio.get_running_loop()
-        batch_size = 400
+        batch_size = 20
         
+        total_chunks = (len(formatted_pages) + batch_size - 1) // batch_size
+        chunk_count = 0
         for i in range(0, len(formatted_pages), batch_size):
             chunk = formatted_pages[i:i + batch_size]
             batch = self.db.batch()
@@ -196,6 +207,10 @@ class StorageIndexerAgent:
                     "embedding": emb_vector
                 })
             await loop.run_in_executor(None, batch.commit)
+            chunk_count += 1
+            if progress_callback and total_chunks > 0:
+                current_prog = 91 + int((chunk_count / total_chunks) * 8)
+                await progress_callback(current_prog)
 
         print(f"[Indexer] Finished indexing book: {book_id}")
         return {

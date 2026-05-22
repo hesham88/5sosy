@@ -388,20 +388,35 @@ async def run_sync_pipeline(
                 reader = PdfReader(io.BytesIO(pdf_bytes))
                 
                 # Split pages locally
-                page_tasks = []
+                page_data_list = []
                 for p_idx in range(total_pages):
-                    page_num = p_idx + 1
                     writer = PdfWriter()
                     writer.add_page(reader.pages[p_idx])
-                    
                     page_io = io.BytesIO()
                     writer.write(page_io)
                     page_bytes = page_io.getvalue()
-                    
-                    # Concurrently format pages
-                    t = formatter_agent.format_single_page(page_num, page_bytes, semaphore)
-                    page_tasks.append(t)
+                    page_data_list.append((p_idx + 1, page_bytes))
 
+                completed_count = 0
+                async def format_and_track(page_num, page_bytes):
+                    nonlocal completed_count
+                    res = await formatter_agent.format_single_page(page_num, page_bytes, semaphore)
+                    completed_count += 1
+                    if total_pages > 0:
+                        prog = 50 + int((completed_count / total_pages) * 30)
+                        if completed_count == total_pages or completed_count % max(1, total_pages // 10) == 0:
+                            tasks_map[task_key]["progress"] = prog
+                            legacy_books_list[b_id]["progress"] = prog
+                            filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
+                            status_ref.update({
+                                "progressMessage": f"Formatting page {completed_count}/{total_pages} for {b_title}...",
+                                "tasks": filtered_tasks,
+                                "booksList": filtered_books,
+                                "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
+                            })
+                    return res
+
+                page_tasks = [format_and_track(p_num, p_bytes) for p_num, p_bytes in page_data_list]
                 formatted_pages = await asyncio.gather(*page_tasks)
                 formatted_pages.sort(key=lambda x: x["pageNumber"])
 
@@ -447,7 +462,18 @@ async def run_sync_pipeline(
                     "chapters": chapters_list
                 }
                 
-                await indexer.index_book(b_id, book_metadata, formatted_pages)
+                async def index_progress_callback(prog_val: int):
+                    tasks_map[task_key]["progress"] = prog_val
+                    legacy_books_list[b_id]["progress"] = prog_val
+                    filtered_tasks, filtered_books = filter_status_maps(tasks_map, legacy_books_list)
+                    status_ref.update({
+                        "progressMessage": f"Indexing and generating search embeddings ({prog_val}%)...",
+                        "tasks": filtered_tasks,
+                        "booksList": filtered_books,
+                        "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
+                    })
+
+                await indexer.index_book(b_id, book_metadata, formatted_pages, progress_callback=index_progress_callback)
 
                 # Completed!
                 tasks_map[task_key]["status"] = "completed"

@@ -679,10 +679,11 @@ async def ingestion_sync(
 # In-memory cache for page embeddings
 _pages_cache: list[dict] = []
 _cache_loaded: bool = False
+_last_cache_load_time: float = 0.0
 _cache_lock = asyncio.Lock()
 
 async def load_pages_cache():
-    global _pages_cache, _cache_loaded
+    global _pages_cache, _cache_loaded, _last_cache_load_time
     async with _cache_lock:
         print("Loading pages cache from Firestore collection group 'pages'...")
         try:
@@ -707,6 +708,7 @@ async def load_pages_cache():
                     })
             _pages_cache = new_cache
             _cache_loaded = True
+            _last_cache_load_time = time.time()
             print(f"Pages cache loaded. Total pages: {len(_pages_cache)}")
         except Exception as e:
             print(f"Error loading pages cache: {e}")
@@ -735,8 +737,8 @@ def cosine_similarity(v1, v2):
 @app.post("/v1/books/search")
 async def books_search(req: SearchRequest, x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> dict:
     _require_api_key(x_api_key)
-    global _pages_cache, _cache_loaded
-    if not _cache_loaded:
+    global _pages_cache, _cache_loaded, _last_cache_load_time
+    if not _cache_loaded or not _pages_cache or (time.time() - _last_cache_load_time > 180):
         await load_pages_cache()
     if not req.query.strip():
         return {"results": []}
