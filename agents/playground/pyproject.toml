@@ -19,6 +19,7 @@ dependencies = [
     "python-multipart>=0.0.12",
     "pypdf>=4.0.0",
     "httpx>=0.27.0",
+    "psutil>=5.9.0",
 ]
 
 [project.optional-dependencies]
@@ -39,6 +40,8 @@ include = [
     "executor_agent*",
     "onboarding_agent*",
     "ingestion_agent*",
+    "harvester_agent*",
+    "analyzer_agent*",
     "pdf_parser_agent*",
     "shared*"
 ]

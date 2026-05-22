@@ -54,7 +54,12 @@ if (-not $repoExists) {
 }
 
 # Same comma-escape trick as deploy.ps1.
-$envVars = "^@^GEMINI_MODEL=gemini-3.1-flash-lite@GOOGLE_GENAI_USE_VERTEXAI=FALSE@FIRESTORE_PROJECT=$Project@FIRESTORE_DATABASE=(default)@GCS_BUCKET=khsosy.firebasestorage.app"
+# MALLOC_TRIM_THRESHOLD_=131072 forces glibc to return freed memory to the OS
+# at 128 KB chunks instead of holding multi-MB arenas. Without it, page splitting
+# spikes RSS by ~1 GB per big PDF and the memory never returns even after the
+# Python objects are freed — visible as "after_split=2 GB → after_format barely
+# drops" in the [mem] trace. See coding_agent/claude/ingestion_oom_analysis.md.
+$envVars = "^@^GEMINI_MODEL=gemini-3.1-flash-lite@GOOGLE_GENAI_USE_VERTEXAI=FALSE@FIRESTORE_PROJECT=$Project@FIRESTORE_DATABASE=(default)@GCS_BUCKET=khsosy.firebasestorage.app@MALLOC_TRIM_THRESHOLD_=131072@MAX_BOOKS_PER_RUN=80@SYNC_WORKER_COUNT=2"
 
 Write-Host "Deploying Cloud Run Job $Job to $Region in $Project (builds via Cloud Build)..." -ForegroundColor Cyan
 
@@ -70,8 +75,8 @@ gcloud run jobs deploy $Job `
   --project $Project `
   --region $Region `
   --quiet `
-  --memory 2Gi `
-  --cpu 1 `
+  --memory 8Gi `
+  --cpu 4 `
   --task-timeout 86400 `
   --max-retries 0 `
   --parallelism 1 `

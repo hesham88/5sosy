@@ -266,9 +266,17 @@ class StorageIndexerAgent:
                     })
                 )
 
-        # 4. Generate embeddings in parallel
+        # content/full is durable in Firestore now. Drop the 45 MB joined string
+        # and the dict that still references formatted_pages — embedding generation
+        # below needs formatted_pages itself, but not these wrappers.
+        consolidated_pages = None
+        full_rich_text = None
+        content_payload = None
+
+        # 4. Generate embeddings in parallel.
+        # Bumped 10→20 — Gemini latency dominates wall time; CPU is idle.
         print(f"[Indexer] Generating page embeddings in parallel for {len(formatted_pages)} pages...")
-        embed_semaphore = asyncio.Semaphore(10)
+        embed_semaphore = asyncio.Semaphore(20)
         
         embed_completed = 0
         async def embed_single_page(p):

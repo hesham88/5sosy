@@ -742,21 +742,16 @@ async def ingestion_sync(
             }
         )
 
-        # Clear books collection (batched, only catalog-sync books — admin SDK
-        # has free reign; the client deletes its own custom books via
-        # /api/books/delete on the web side).
+        # Wipe books/ and all nested subcollections (content/full, pages/{N}).
+        # Plain doc.delete() does NOT cascade in Firestore — orphaned subcollection
+        # docs would survive and surface as "empty placeholder" paths in the Console,
+        # which the client SDK then can't clean up because firestore.rules denies
+        # writes on /books/**. recursive_delete uses a server-side BulkWriter.
         books_coll = db.collection("books")
         loop = asyncio.get_running_loop()
-        deleted = 0
-        while True:
-            docs = await loop.run_in_executor(None, lambda: list(books_coll.limit(100).stream()))
-            if not docs:
-                break
-            for d in docs:
-                await loop.run_in_executor(None, d.reference.delete)
-                deleted += 1
-            if len(docs) < 100:
-                break
+        deleted = await loop.run_in_executor(
+            None, lambda: db.recursive_delete(books_coll)
+        )
 
         return {
             "ok": True,
@@ -766,6 +761,308 @@ async def ingestion_sync(
 
     else:
         raise HTTPException(status_code=400, detail=f"Unknown sync command: {req.command}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Split-job control plane: khsosybot-get-books (harvester) + khsosybot-analyze-books (analyzer)
+# Each has its own status doc and its own Cloud Run Job. Both share this handler.
+# ─────────────────────────────────────────────────────────────────────────────
+
+HARVESTER_JOB_NAME = os.getenv("HARVESTER_JOB_NAME", "khsosybot-get-books")
+ANALYZER_JOB_NAME = os.getenv("ANALYZER_JOB_NAME", "khsosybot-analyze-books")
+
+
+def _job_config(kind: str) -> tuple[str, str]:
+    """(job_name, status_doc_id) for a given job kind."""
+    if kind == "harvester":
+        return HARVESTER_JOB_NAME, "harvester_status"
+    if kind == "analyzer":
+        return ANALYZER_JOB_NAME, "analyzer_status"
+    raise HTTPException(status_code=400, detail=f"Unknown job kind: {kind}")
+
+
+def _job_resource(job_name: str) -> str:
+    return f"projects/{SYNC_JOB_PROJECT}/locations/{SYNC_JOB_REGION}/jobs/{job_name}"
+
+
+def _launch_job(job_name: str) -> str:
+    """Trigger a fresh Cloud Run Job execution. Same pattern as _launch_sync_job."""
+    client = run_v2.JobsClient()
+    operation = client.run_job(name=_job_resource(job_name))
+    try:
+        meta = operation.metadata
+        if meta is not None:
+            name = getattr(meta, "name", "") or ""
+            if name:
+                return name
+    except Exception as exc:  # noqa: BLE001
+        print(f"_launch_job({job_name}): metadata read failed: {exc}")
+    try:
+        ec = run_v2.ExecutionsClient()
+        latest = None
+        for execution in ec.list_executions(parent=_job_resource(job_name)):
+            if latest is None or execution.create_time > latest.create_time:
+                latest = execution
+        if latest is not None:
+            return latest.name
+    except Exception as exc:  # noqa: BLE001
+        print(f"_launch_job({job_name}): list_executions failed: {exc}")
+    return ""
+
+
+def _cancel_execution(execution_name: str, job_name: str) -> bool:
+    if not execution_name:
+        return False
+    full = execution_name if execution_name.startswith("projects/") else f"{_job_resource(job_name)}/executions/{execution_name}"
+    try:
+        client = run_v2.ExecutionsClient()
+        client.cancel_execution(name=full)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        print(f"Failed to cancel {full}: {exc}")
+        return False
+
+
+def _seed_job_running(status_doc_id: str, log_text: str) -> None:
+    ref = db.collection("ingestion").document(status_doc_id)
+    existing = ref.get().to_dict() or {}
+    ref.set(
+        {
+            "status": "running",
+            "pausedByRequest": False,
+            "logs": [
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "text": log_text,
+                    "status": "info",
+                    "agent": "Orchestrator",
+                }
+            ],
+            "totalBooks": existing.get("totalBooks", 0),
+            "downloadedBooks": existing.get("downloadedBooks", 0),
+            "indexedBooks": existing.get("indexedBooks", 0),
+            "failedBooks": existing.get("failedBooks", 0),
+            "totalPagesProcessed": existing.get("totalPagesProcessed", 0),
+            "percentage": existing.get("percentage", 0.0),
+            "activeBookTitle": "",
+            "progressMessage": "Starting…",
+            "startedAt": firestore.SERVER_TIMESTAMP,
+            "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
+            "executionName": "",
+            "errorMessage": "",
+        },
+        merge=False,
+    )
+
+
+def _reset_books_for_analyzer() -> int:
+    """Revert all `books/{id}` from status='indexed' back to 'downloaded' and
+    wipe pages + content subcollections. Keeps the downloaded PDFs intact so the
+    user doesn't have to re-run the harvester. Returns count of books reset."""
+    count = 0
+    for d in db.collection("books").stream():
+        data = d.to_dict() or {}
+        if data.get("status") not in ("indexed", "indexing", "failed"):
+            continue
+        try:
+            db.recursive_delete(d.reference.collection("pages"))
+        except Exception as exc:  # noqa: BLE001
+            print(f"reset analyzer: pages delete failed for {d.id}: {exc}")
+        try:
+            db.recursive_delete(d.reference.collection("content"))
+        except Exception as exc:  # noqa: BLE001
+            print(f"reset analyzer: content delete failed for {d.id}: {exc}")
+        d.reference.set(
+            {
+                "status": "downloaded" if data.get("storagePath", "").startswith("gs://") else "pending",
+                "pages": 0,
+                "chapters": [],
+                "errorMessage": "",
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+        count += 1
+    return count
+
+
+async def _handle_job_command(kind: str, command: str) -> dict:
+    job_name, status_doc_id = _job_config(kind)
+    status_ref = db.collection("ingestion").document(status_doc_id)
+    loop = asyncio.get_running_loop()
+
+    if command == "start":
+        existing = status_ref.get().to_dict() or {}
+        if existing.get("status") == "running":
+            hb = existing.get("lastHeartbeatAt")
+            hb_age = float("inf")
+            if hb is not None and hasattr(hb, "timestamp"):
+                try:
+                    hb_age = time.time() - hb.timestamp()
+                except Exception:
+                    hb_age = float("inf")
+            if hb_age < 180:
+                return {
+                    "ok": True,
+                    "status": "running",
+                    "kind": kind,
+                    "message": f"{kind.capitalize()} is already running.",
+                    "executionName": existing.get("executionName", ""),
+                }
+            print(f"[{kind}] heartbeat stale ({hb_age:.0f}s) — relaunching.")
+
+        _seed_job_running(status_doc_id, f"Launching {kind} job…")
+        try:
+            execution_name = await loop.run_in_executor(None, lambda: _launch_job(job_name))
+        except Exception as exc:  # noqa: BLE001
+            status_ref.update(
+                {
+                    "status": "error",
+                    "errorMessage": f"Failed to launch {kind}: {exc}",
+                    "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
+                }
+            )
+            raise HTTPException(status_code=500, detail=f"Failed to launch {kind}: {exc}")
+
+        update_fields: dict = {"lastHeartbeatAt": firestore.SERVER_TIMESTAMP}
+        if execution_name:
+            update_fields["executionName"] = execution_name
+        status_ref.update(update_fields)
+        return {
+            "ok": True,
+            "status": "running",
+            "kind": kind,
+            "executionName": execution_name,
+            "message": f"{kind.capitalize()} job execution launched.",
+        }
+
+    if command == "pause":
+        status_ref.update(
+            {
+                "pausedByRequest": True,
+                "status": "paused",
+                "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
+            }
+        )
+        return {"ok": True, "status": "paused", "kind": kind, "message": "Pause request received."}
+
+    if command == "resume":
+        status_ref.update({"pausedByRequest": False})
+        _seed_job_running(status_doc_id, f"Resuming {kind} job…")
+        try:
+            execution_name = await loop.run_in_executor(None, lambda: _launch_job(job_name))
+        except Exception as exc:  # noqa: BLE001
+            status_ref.update(
+                {
+                    "status": "error",
+                    "errorMessage": f"Failed to resume {kind}: {exc}",
+                    "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
+                }
+            )
+            raise HTTPException(status_code=500, detail=f"Failed to resume {kind}: {exc}")
+        if execution_name:
+            status_ref.update({"executionName": execution_name})
+        return {
+            "ok": True,
+            "status": "running",
+            "kind": kind,
+            "executionName": execution_name,
+            "message": f"{kind.capitalize()} resumed.",
+        }
+
+    if command == "stop":
+        existing = status_ref.get().to_dict() or {}
+        exec_name = existing.get("executionName", "")
+        cancelled = await loop.run_in_executor(None, lambda: _cancel_execution(exec_name, job_name))
+        status_ref.update(
+            {
+                "status": "idle",
+                "pausedByRequest": False,
+                "autoRestart": False,
+                "progressMessage": f"{kind.capitalize()} stopped by user." if cancelled else existing.get("progressMessage", ""),
+                "executionName": "",
+                "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
+            }
+        )
+        return {
+            "ok": True,
+            "status": "idle",
+            "kind": kind,
+            "cancelled": cancelled,
+            "message": (
+                f"{kind.capitalize()} execution cancelled: {exec_name}"
+                if cancelled else "No active execution to cancel."
+            ),
+        }
+
+    if command == "reset":
+        existing = status_ref.get().to_dict() or {}
+        exec_name = existing.get("executionName", "")
+        await loop.run_in_executor(None, lambda: _cancel_execution(exec_name, job_name))
+
+        status_ref.set(
+            {
+                "status": "idle",
+                "pausedByRequest": False,
+                "autoRestart": False,
+                "logs": [],
+                "totalBooks": 0,
+                "downloadedBooks": 0,
+                "indexedBooks": 0,
+                "failedBooks": 0,
+                "percentage": 0.0,
+                "activeBookTitle": "",
+                "progressMessage": "",
+                "executionName": "",
+                "errorMessage": "",
+                "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
+            },
+            merge=False,
+        )
+
+        if kind == "harvester":
+            # Wipe everything — the harvester populates books from scratch.
+            books_coll = db.collection("books")
+            deleted = await loop.run_in_executor(None, lambda: db.recursive_delete(books_coll))
+            return {
+                "ok": True,
+                "status": "idle",
+                "kind": "harvester",
+                "message": f"Harvester reset. Wiped {deleted} book documents (incl. subcollections).",
+            }
+        else:  # analyzer
+            reset_count = await loop.run_in_executor(None, _reset_books_for_analyzer)
+            return {
+                "ok": True,
+                "status": "idle",
+                "kind": "analyzer",
+                "message": f"Analyzer reset. Reverted {reset_count} books to status='downloaded' (PDFs kept).",
+            }
+
+    raise HTTPException(status_code=400, detail=f"Unknown {kind} command: {command}")
+
+
+class JobCommandRequest(BaseModel):
+    command: str
+    username: str = "guest"
+
+
+@app.post("/v1/ingestion/harvester")
+async def ingestion_harvester(
+    req: JobCommandRequest,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> dict:
+    _require_api_key(x_api_key)
+    return await _handle_job_command("harvester", req.command)
+
+
+@app.post("/v1/ingestion/analyzer")
+async def ingestion_analyzer(
+    req: JobCommandRequest,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> dict:
+    _require_api_key(x_api_key)
+    return await _handle_job_command("analyzer", req.command)
 
 
 # In-memory cache for page embeddings

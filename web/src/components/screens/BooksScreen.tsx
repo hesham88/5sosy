@@ -13,6 +13,7 @@ import { AgentLog, Btn, Card, Ring, SubjectChip, type AgentLogLine } from '../sh
 import { SUBJECT_META, HUE, type HueId } from '@/constants/subjects';
 import { callAgent, type AgentName } from '@/lib/agents';
 import type { Book, SubjectId, IngestionStatus, Video } from '@/lib/types';
+import PipelineConsole from '../sync/PipelineConsole';
 
 type ActionKey = 'chat' | 'summarize' | 'explain' | 'audio' | 'quiz' | 'questions';
 
@@ -565,7 +566,12 @@ export default function BooksScreen() {
           </div>
         </div>
 
-        {/* Ingestion Sync Control Center */}
+        {/* New two-job Pipeline Console — Get Books + Analyze Books */}
+        {showSyncDashboard && (
+          <PipelineConsole isAR={isAR} />
+        )}
+
+        {/* Legacy single-job Sync Console — kept around during the transition */}
         {showSyncDashboard && (
           <Card className="mb-6 p-5 border border-slate-200 bg-slate-50/50">
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-4 mb-4">

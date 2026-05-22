@@ -15,6 +15,15 @@ import io
 import time
 import gc
 
+try:
+    import psutil
+    _proc = psutil.Process()
+    def _rss_mb() -> float:
+        return _proc.memory_info().rss / 1_000_000
+except Exception:
+    def _rss_mb() -> float:
+        return -1.0
+
 from google.adk.agents.llm_agent import Agent
 from google.cloud import firestore
 from google.cloud import storage
@@ -441,20 +450,18 @@ async def run_sync_pipeline(
                         "lastHeartbeatAt": firestore.SERVER_TIMESTAMP
                     }))
 
-                # 4. Split PDF locally and format each page in parallel
+                # 4. Split + format pages in chunks. The previous version split
+                # ALL pages upfront into per-page byte blobs (page_data_list).
+                # For a 200-page image-heavy textbook at ~5 MB/page that's ~1 GB
+                # in flight per worker × 3 workers = OOM on a 4 GiB container.
+                # Chunking bounds the in-flight per-page bytes to CHUNK_SIZE pages
+                # regardless of book size. See coding_agent/claude/ingestion_oom_analysis.md.
+                print(f"[mem] book={book_idx} step=before_split rss={_rss_mb():.0f}MB")
                 reader = PdfReader(io.BytesIO(pdf_bytes))
-                
-                # Split pages locally
-                page_data_list = []
-                for p_idx in range(total_pages):
-                    writer = PdfWriter()
-                    writer.add_page(reader.pages[p_idx])
-                    page_io = io.BytesIO()
-                    writer.write(page_io)
-                    page_bytes = page_io.getvalue()
-                    page_data_list.append((p_idx + 1, page_bytes))
 
-                page_semaphore = asyncio.Semaphore(5)
+                # API-bound work: bumped from 5→15 since wall time is dominated by
+                # Gemini latency, not CPU.
+                page_semaphore = asyncio.Semaphore(15)
                 completed_count = 0
                 async def format_and_track(page_num, page_bytes):
                     nonlocal completed_count
@@ -476,9 +483,35 @@ async def run_sync_pipeline(
                                 }))
                     return res
 
-                page_tasks = [format_and_track(p_num, p_bytes) for p_num, p_bytes in page_data_list]
-                formatted_pages = await asyncio.gather(*page_tasks)
+                CHUNK_SIZE = 32
+                formatted_pages = []
+                for chunk_start in range(0, total_pages, CHUNK_SIZE):
+                    chunk_end = min(chunk_start + CHUNK_SIZE, total_pages)
+                    chunk_data = []
+                    for p_idx in range(chunk_start, chunk_end):
+                        writer = PdfWriter()
+                        writer.add_page(reader.pages[p_idx])
+                        page_io = io.BytesIO()
+                        writer.write(page_io)
+                        chunk_data.append((p_idx + 1, page_io.getvalue()))
+
+                    chunk_tasks = [format_and_track(p_num, p_bytes) for p_num, p_bytes in chunk_data]
+                    chunk_results = await asyncio.gather(*chunk_tasks)
+                    formatted_pages.extend(chunk_results)
+
+                    # Drop this chunk's per-page bytes before splitting the next.
+                    chunk_data = None
+                    chunk_tasks = None
+                    chunk_results = None
+                    gc.collect()
+
                 formatted_pages.sort(key=lambda x: x["pageNumber"])
+
+                # OCR is done — the source PDF and reader are no longer needed.
+                pdf_bytes = None
+                reader = None
+                gc.collect()
+                print(f"[mem] book={book_idx} step=after_format rss={_rss_mb():.0f}MB")
 
                 # Check for pause
                 curr_status = await get_status_safe_cached()
@@ -619,13 +652,22 @@ async def run_sync_pipeline(
                         }, merge=True)
                     await loop.run_in_executor(None, _update_firestore_on_error)
 
-        # Queue-based execution pool limit to 3 books in parallel.
-        # This keeps memory down and handles resume skipping instantly without I/O.
+        # Queue-based execution pool. Worker count and per-execution book cap
+        # are both env-tunable so a single Job execution can be bounded and
+        # restarted to dodge cumulative per-big-book retention (pypdf / Gemini
+        # SDK / asyncio task refs) that even MALLOC_TRIM_THRESHOLD_ can't reach.
+        # The pipeline is resumable via indexed_book_ids, so exiting partway is safe.
         queue = asyncio.Queue()
         for idx, book_data in enumerate(catalog):
             await queue.put((idx, book_data))
 
-        async def worker_loop():
+        max_books_per_run = int(os.getenv("MAX_BOOKS_PER_RUN", "0") or 0)
+        worker_count = int(os.getenv("SYNC_WORKER_COUNT", "2") or 2)
+        books_processed_this_run = 0
+        books_lock = asyncio.Lock()
+
+        async def worker_loop(worker_id: int):
+            nonlocal books_processed_this_run
             while not queue.empty():
                 try:
                     idx, book_data = queue.get_nowait()
@@ -634,7 +676,7 @@ async def run_sync_pipeline(
 
                 gov_url = book_data["link"]
                 b_id = get_book_id(gov_url, book_data.get("subject", "book"))
-                
+
                 # Check skip condition BEFORE doing any Firestore reads
                 if b_id in indexed_book_ids:
                     queue.task_done()
@@ -646,18 +688,31 @@ async def run_sync_pipeline(
                     queue.task_done()
                     break
 
+                # Bound this execution. Returning leaves the queue partially drained,
+                # but indexed_book_ids will skip everything we did when the next
+                # execution starts.
+                if max_books_per_run > 0:
+                    async with books_lock:
+                        if books_processed_this_run >= max_books_per_run:
+                            queue.task_done()
+                            break
+
+                print(f"[mem] worker={worker_id} book={idx} step=start rss={_rss_mb():.0f}MB")
                 try:
                     await process_single_book(idx, book_data)
                 except Exception as ex:
                     print(f"Error in worker_loop processing book {idx}: {ex}")
                 finally:
+                    async with books_lock:
+                        books_processed_this_run += 1
                     # Clean up memory aggressively
                     gc.collect()
+                    print(f"[mem] worker={worker_id} book={idx} step=end rss={_rss_mb():.0f}MB count={books_processed_this_run}")
                     queue.task_done()
 
-        # Run exactly 3 worker tasks in parallel
-        worker_tasks = [asyncio.create_task(worker_loop()) for _ in range(3)]
+        worker_tasks = [asyncio.create_task(worker_loop(i)) for i in range(worker_count)]
         await asyncio.gather(*worker_tasks)
+        print(f"[sync] execution finished: processed={books_processed_this_run} max={max_books_per_run} workers={worker_count}")
 
         # Check final status
         final_status = await get_status_safe()
