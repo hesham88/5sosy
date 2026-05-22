@@ -69,9 +69,9 @@ where 81% of Egyptian secondary students currently rely on private tutors.
 | Database     | Cloud Firestore (with security rules + indexes)                     |
 | Storage      | Firebase Storage (per-user upload scopes)                           |
 | Hosting      | Firebase **App Hosting** (Next.js SSR on Cloud Run, GitHub-driven)  |
-| Agents       | Google **ADK** + Gemini **2.5 Pro / Flash / Flash-Lite**            |
-| Multimodal   | Gemini 1.5 Pro for PDF OCR                                          |
-| Retrieval    | Vertex AI Vector Search (`text-embedding-005`)                      |
+| Agents       | Google **ADK** + Gemini **3.1 Flash-Lite** (default for all agents) |
+| Multimodal   | Gemini 3.1 Flash-Lite for vision/PDF OCR                            |
+| Retrieval    | Vertex AI Vector Search (`gemini-embedding-2`)                      |
 | Agent host   | FastAPI on **Cloud Run**                                            |
 | i18n         | Arabic (RTL) + English (LTR), Cairo / Tajawal / Inter, locale cookies |
 
