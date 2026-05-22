@@ -15,6 +15,7 @@ import io
 from google.adk.agents.llm_agent import Agent
 from google.cloud import firestore
 from google.cloud import storage
+from pypdf import PdfReader, PdfWriter
 
 from ingestion_agent.crawler import CrawlerAgent
 from ingestion_agent.video_extractor import VideoExtractorAgent
