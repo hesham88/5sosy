@@ -12,7 +12,7 @@ from pypdf import PdfReader, PdfWriter
 from google import genai
 from google.genai import types
 
-MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash") # Vision/multimodal works best with 2.5-flash
+MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
 class ChapterInfo(BaseModel):
     title: str = Field(description="The title of the chapter or section")

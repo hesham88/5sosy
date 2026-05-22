@@ -11,7 +11,7 @@ from google import genai
 from google.genai import types
 from google.cloud import storage
 
-MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
 class BookFormatterAgent:
     def __init__(self, model_name: str = MODEL):
