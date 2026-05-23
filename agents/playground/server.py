@@ -14,12 +14,13 @@ var is unset, auth is disabled (for local dev only — Cloud Run sets it).
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 import json
 import os
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 from dotenv import load_dotenv
 
@@ -406,7 +407,7 @@ def _seed_status_running() -> None:
     """Eagerly seed `ingestion/status` so the UI has something to render
     before the Cloud Run Job container even starts. Wipes old booksList."""
     status_ref = db.collection("ingestion").document("status")
-    existing = status_ref.get().to_dict() or {}
+    existing = status_ref.get().to_dict() or {}  # type: ignore
     status_ref.set(
         {
             "status": "running",
@@ -453,7 +454,7 @@ def _launch_sync_job() -> str:
         ec = run_v2.ExecutionsClient()
         latest = None
         for execution in ec.list_executions(parent=_sync_job_resource()):
-            if latest is None or execution.create_time > latest.create_time:
+            if latest is None or execution.create_time > latest.create_time:  # type: ignore
                 latest = execution
         if latest is not None:
             return latest.name
@@ -502,7 +503,7 @@ async def _monitor_sync_execution(execution_name: str = ""):
         try:
             status_ref = db.collection("ingestion").document("status")
             status_doc = await asyncio.get_running_loop().run_in_executor(None, status_ref.get)
-            status_data = status_doc.to_dict() or {}
+            status_data = status_doc.to_dict() or {}  # type: ignore
 
             if status_data.get("status") != "running":
                 print(f"Monitoring stopped for execution '{active_exec}' because Firestore status is '{status_data.get('status')}'")
@@ -556,7 +557,7 @@ async def _monitor_sync_execution(execution_name: str = ""):
                 if is_failed:
                     print(f"Execution {active_exec} failed. Marking Firestore status as error: {err_msg}")
                     latest_doc = await asyncio.get_running_loop().run_in_executor(None, status_ref.get)
-                    latest_data = latest_doc.to_dict() or {}
+                    latest_data = latest_doc.to_dict() or {}  # type: ignore
                     if latest_data.get("status") == "running":
                         status_ref.update({
                             "status": "error",
@@ -566,7 +567,7 @@ async def _monitor_sync_execution(execution_name: str = ""):
                 else:
                     print(f"Execution {active_exec} completed successfully.")
                     latest_doc = await asyncio.get_running_loop().run_in_executor(None, status_ref.get)
-                    latest_data = latest_doc.to_dict() or {}
+                    latest_data = latest_doc.to_dict() or {}  # type: ignore
                     if latest_data.get("status") == "running":
                         status_ref.update({
                             "status": "completed",
@@ -593,7 +594,7 @@ async def ingestion_sync(
     status_ref = db.collection("ingestion").document("status")
 
     if req.command == "start":
-        existing = status_ref.get().to_dict() or {}
+        existing = status_ref.get().to_dict() or {}  # type: ignore
         # Stale heartbeat → previous execution died without writing a terminal
         # state. Treat it as restartable so the user isn't stuck with a phantom
         # "running" status forever.
@@ -690,7 +691,7 @@ async def ingestion_sync(
         }
 
     elif req.command == "kill":
-        existing = status_ref.get().to_dict() or {}
+        existing = status_ref.get().to_dict() or {}  # type: ignore
         exec_name = existing.get("executionName", "")
         cancelled = await asyncio.get_running_loop().run_in_executor(
             None, _cancel_sync_execution, exec_name
@@ -715,7 +716,7 @@ async def ingestion_sync(
         }
 
     elif req.command == "reset":
-        existing = status_ref.get().to_dict() or {}
+        existing = status_ref.get().to_dict() or {}  # type: ignore
         exec_name = existing.get("executionName", "")
         await asyncio.get_running_loop().run_in_executor(
             None, _cancel_sync_execution, exec_name
@@ -809,7 +810,7 @@ def _launch_job(job_name: str, overrides: dict | None = None) -> str:
         ec = run_v2.ExecutionsClient()
         latest = None
         for execution in ec.list_executions(parent=_job_resource(job_name)):
-            if latest is None or execution.create_time > latest.create_time:
+            if latest is None or execution.create_time > latest.create_time:  # type: ignore
                 latest = execution
         if latest is not None:
             return latest.name
@@ -833,7 +834,7 @@ def _cancel_execution(execution_name: str, job_name: str) -> bool:
 
 def _seed_job_running(status_doc_id: str, log_text: str) -> None:
     ref = db.collection("ingestion").document(status_doc_id)
-    existing = ref.get().to_dict() or {}
+    existing = ref.get().to_dict() or {}  # type: ignore
     ref.set(
         {
             "status": "running",
@@ -900,7 +901,7 @@ async def _handle_job_command(kind: str, command: str) -> dict:
     loop = asyncio.get_running_loop()
 
     if command == "start":
-        existing = status_ref.get().to_dict() or {}
+        existing = status_ref.get().to_dict() or {}  # type: ignore
         if existing.get("status") == "running":
             hb = existing.get("lastHeartbeatAt")
             hb_age = float("inf")
@@ -979,7 +980,7 @@ async def _handle_job_command(kind: str, command: str) -> dict:
         }
 
     if command == "stop":
-        existing = status_ref.get().to_dict() or {}
+        existing = status_ref.get().to_dict() or {}  # type: ignore
         exec_name = existing.get("executionName", "")
         cancelled = await loop.run_in_executor(None, lambda: _cancel_execution(exec_name, job_name))
         status_ref.update(
@@ -1004,7 +1005,7 @@ async def _handle_job_command(kind: str, command: str) -> dict:
         }
 
     if command == "reset":
-        existing = status_ref.get().to_dict() or {}
+        existing = status_ref.get().to_dict() or {}  # type: ignore
         exec_name = existing.get("executionName", "")
         await loop.run_in_executor(None, lambda: _cancel_execution(exec_name, job_name))
 
@@ -1165,7 +1166,7 @@ async def load_pages_cache():
             )
             new_cache = []
             for doc in docs:
-                data = doc.to_dict()
+                data = doc.to_dict() or {}
                 if "embedding" in data and data["embedding"]:
                     emb_val = data["embedding"]
                     if isinstance(emb_val, bytes):
@@ -1193,15 +1194,15 @@ async def load_pages_cache():
         except Exception as e:
             print(f"Error loading pages cache: {e}")
 
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     asyncio.create_task(load_pages_cache())
 
     async def check_and_start_monitor():
         try:
             status_ref = db.collection("ingestion").document("status")
             status_doc = await asyncio.get_running_loop().run_in_executor(None, status_ref.get)
-            status_data = status_doc.to_dict() or {}
+            status_data = status_doc.to_dict() or {}  # type: ignore
             if status_data.get("status") == "running":
                 exec_name = status_data.get("executionName", "")
                 print(f"Detected running ingestion sync on startup. Restarting monitor for execution: {exec_name}")
@@ -1210,6 +1211,9 @@ async def startup_event():
             print(f"Error starting execution monitor on startup: {e}")
 
     asyncio.create_task(check_and_start_monitor())
+    yield
+
+app.router.lifespan_context = lifespan
 
 class SearchRequest(BaseModel):
     query: str
@@ -1242,7 +1246,10 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
             model="models/gemini-embedding-2",
             contents=req.query
         )
-        query_emb = response.embeddings[0].values
+        embs = response.embeddings
+        if not embs or not embs[0].values:
+            raise HTTPException(status_code=500, detail="Failed to get embedding")
+        query_emb = list(embs[0].values)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate query embedding: {e}")
     results = []
@@ -1285,7 +1292,7 @@ async def parse_book_endpoint(
     _require_api_key(x_api_key)
     book_ref = db.collection("books").document(req.bookId)
     doc = book_ref.get()
-    doc_data = doc.to_dict() or {}
+    doc_data = doc.to_dict() or {}  # type: ignore
     # Only short-circuit if the book is actually fully indexed. The frontend
     # creates the doc with status='processing' before calling us, so checking
     # doc.exists alone would skip every parse.

@@ -39,8 +39,10 @@ from ingestion_agent.counter import PageCounterAgent
 from ingestion_agent.formatter import BookFormatterAgent
 
 try:
-    sys.stdout.reconfigure(encoding="utf-8")
-    sys.stderr.reconfigure(encoding="utf-8")
+    if hasattr(sys.stdout, "reconfigure"):
+        getattr(sys.stdout, "reconfigure")(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        getattr(sys.stderr, "reconfigure")(encoding="utf-8")
 except AttributeError:
     pass
 
@@ -92,7 +94,9 @@ async def _embed_text(client: genai.Client, text: str, max_retries: int = 3) -> 
                 contents=text or " ",
             )
             if resp.embeddings and len(resp.embeddings) > 0:
-                return list(resp.embeddings[0].values)
+                vals = resp.embeddings[0].values
+                if vals is not None:
+                    return list(vals)
             return [0.0] * EMBEDDING_DIM
         except Exception as ex:  # noqa: BLE001
             if attempt == max_retries - 1:
@@ -107,14 +111,15 @@ async def run_analyzer_pipeline(db: firestore.Client) -> None:
     """Consume books with `status='downloaded'`, parse from volume mount,
     write per-page docs + content/full, mark `status='indexed'`."""
     provider = os.getenv("DATABASE_PROVIDER", "firestore").lower()
-    mongo_db = None
+    mongo_db: Any = None
+    status_ref: Any = None
     if provider == "mongodb":
         from shared.mongodb_client import get_mongodb_client
         _, mongo_db = get_mongodb_client()
         existing = mongo_db["ingestion"].find_one({"_id": STATUS_DOC}) or {}
     else:
         status_ref = db.collection("ingestion").document(STATUS_DOC)
-        existing = (status_ref.get().to_dict() or {})
+        existing = (status_ref.get().to_dict() or {})  # type: ignore
         
     logs = existing.get("logs", [])
     status_lock = asyncio.Lock()
@@ -151,7 +156,7 @@ async def run_analyzer_pipeline(db: firestore.Client) -> None:
             d = await loop.run_in_executor(None, lambda: mongo_db["ingestion"].find_one({"_id": STATUS_DOC}) or {})
         else:
             doc = await loop.run_in_executor(None, status_ref.get)
-            d = doc.to_dict() or {}
+            d = doc.to_dict() or {}  # type: ignore
         return bool(d.get("pausedByRequest")) or d.get("status") == "paused"
 
     _append_log("Analyzer pipeline started.", "info")
