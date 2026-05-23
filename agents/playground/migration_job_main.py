@@ -68,7 +68,7 @@ async def main_async() -> int:
         tb = traceback.format_exc()
         print(f"Migration job crashed: {exc}\n{tb}", file=sys.stderr)
         try:
-            doc = status_ref.get().to_dict() or {}
+            doc = status_ref.get().to_dict() or {}  # type: ignore
             logs = doc.get("logs", [])
             logs.append({
                 "timestamp": datetime.now(timezone.utc).isoformat(),

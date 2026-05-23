@@ -136,7 +136,12 @@ class StorageIndexerAgent:
                     model=f"models/{EMBEDDING_MODEL}",
                     contents=text,
                 )
-                return list(response.embeddings[0].values)
+                embs = response.embeddings
+                if embs and len(embs) > 0:
+                    vals = embs[0].values
+                    if vals is not None:
+                        return list(vals)
+                return [0.0] * EMBEDDING_DIM
             except Exception as exc:
                 last_exc = exc
                 msg = str(exc).lower()

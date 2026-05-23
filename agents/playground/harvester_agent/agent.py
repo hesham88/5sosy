@@ -29,8 +29,10 @@ from ingestion_agent.crawler import CrawlerAgent
 from ingestion_agent.video_extractor import VideoExtractorAgent
 
 try:
-    sys.stdout.reconfigure(encoding="utf-8")
-    sys.stderr.reconfigure(encoding="utf-8")
+    if hasattr(sys.stdout, "reconfigure"):
+        getattr(sys.stdout, "reconfigure")(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        getattr(sys.stderr, "reconfigure")(encoding="utf-8")
 except AttributeError:
     pass
 
@@ -118,14 +120,15 @@ async def run_harvester_pipeline(
     skeleton book docs. Resumable via existing `books/{id}` docs with
     `storagePath` set."""
     provider = os.getenv("DATABASE_PROVIDER", "firestore").lower()
-    mongo_db = None
+    mongo_db: Any = None
+    status_ref: Any = None
     if provider == "mongodb":
         from shared.mongodb_client import get_mongodb_client
         _, mongo_db = get_mongodb_client()
         existing = mongo_db["ingestion"].find_one({"_id": STATUS_DOC}) or {}
     else:
         status_ref = db.collection("ingestion").document(STATUS_DOC)
-        existing = (status_ref.get().to_dict() or {})
+        existing = (status_ref.get().to_dict() or {})  # type: ignore
         
     logs = existing.get("logs", [])
 
@@ -162,7 +165,7 @@ async def run_harvester_pipeline(
             d = await loop.run_in_executor(None, lambda: mongo_db["ingestion"].find_one({"_id": STATUS_DOC}) or {})
         else:
             doc = await loop.run_in_executor(None, status_ref.get)
-            d = doc.to_dict() or {}
+            d = doc.to_dict() or {}  # type: ignore
         return bool(d.get("pausedByRequest")) or d.get("status") == "paused"
 
     _append_log("Harvester pipeline started.", "info")

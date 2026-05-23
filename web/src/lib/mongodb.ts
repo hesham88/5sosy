@@ -20,8 +20,6 @@ function getMongoUri(): string {
   return uri;
 }
 
-const uri = getMongoUri();
-
 let cachedClient: MongoClient | null = null;
 let cachedDb: Db | null = null;
 
@@ -30,8 +28,10 @@ export async function connectToDatabase(): Promise<{ client: MongoClient; db: Db
     return { client: cachedClient, db: cachedDb };
   }
 
+  const uri = getMongoUri();
+
   // Create a new client if one doesn't exist
-  const client = new MongoClient(uri!);
+  const client = new MongoClient(uri);
   await client.connect();
   const db = client.db(); // Uses the database name from the connection URI
 

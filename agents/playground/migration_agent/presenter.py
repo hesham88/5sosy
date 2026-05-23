@@ -16,9 +16,9 @@ class MigrationPresenter:
             "agent": agent
         }
 
-    def update_progress(self, current_logs: List[Dict[str, str]], message: str, percent: float, results: Dict[str, Any] = None) -> Dict[str, Any]:
+    def update_progress(self, current_logs: List[Dict[str, str]], message: str, percent: float, results: Dict[str, Any] | None = None) -> Dict[str, Any]:
         """Construct the updated migration status dictionary."""
-        payload = {
+        payload: Dict[str, Any] = {
             "progressMessage": message,
             "lastHeartbeatAt": datetime.now(timezone.utc), # Firestore will write SERVER_TIMESTAMP
             "logs": current_logs

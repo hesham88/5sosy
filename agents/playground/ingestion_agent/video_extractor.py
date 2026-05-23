@@ -1,6 +1,7 @@
 """Video Extractor Agent — scrapes video metadata from ellibrary.moe.gov.eg/video/books.json."""
 from __future__ import annotations
 
+import os
 import httpx
 import hashlib
 from datetime import datetime, timezone

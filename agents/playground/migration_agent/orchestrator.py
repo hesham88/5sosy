@@ -51,7 +51,7 @@ class MigrationOrchestrator:
             # Step 1: Execute Copying
             def progress_cb(msg: str, pct: float):
                 self._add_log(msg, "info", "MigrationExecutor")
-                updates = {"progressMessage": msg}
+                updates: Dict[str, Any] = {"progressMessage": msg}
                 if pct >= 0.0:
                     updates["percentage"] = pct
                 self._write_status(updates)
