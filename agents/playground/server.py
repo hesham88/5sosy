@@ -792,7 +792,11 @@ def _job_resource(job_name: str) -> str:
 def _launch_job(job_name: str, overrides: dict | None = None) -> str:
     """Trigger a fresh Cloud Run Job execution. Same pattern as _launch_sync_job."""
     client = run_v2.JobsClient()
-    operation = client.run_job(name=_job_resource(job_name), overrides=overrides)
+    req = run_v2.RunJobRequest(
+        name=_job_resource(job_name),
+        overrides=overrides
+    )
+    operation = client.run_job(request=req)
     try:
         meta = operation.metadata
         if meta is not None:
