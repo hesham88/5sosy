@@ -16,6 +16,8 @@ COPY harvester_agent ./harvester_agent
 COPY analyzer_agent ./analyzer_agent
 COPY pdf_parser_agent ./pdf_parser_agent
 COPY migration_agent ./migration_agent
+COPY language_detection_agent ./language_detection_agent
+COPY translation_agent ./translation_agent
 COPY shared ./shared
 COPY server.py ./
 COPY sync_job_main.py ./
