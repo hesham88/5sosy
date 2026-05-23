@@ -4,10 +4,11 @@ import { useState } from 'react';
 import { ChromeLayout } from '../shared/Chrome';
 import { useApp } from '../shared/Providers';
 import { AgentLog, Btn, Card } from '../shared/atoms';
+import { LanguageSwitcher } from '../shared/LanguageSwitcher';
 import { SUBJECT_META, HUE } from '@/constants/subjects';
 
 export default function SettingsScreen() {
-  const { isAR, locale, setLocale } = useApp();
+  const { isAR } = useApp();
   const [accent, setAccent] = useState<'eg' | 'msa'>('eg');
   const [notif, setNotif] = useState({ daily: true, weekly: true, weak: true, exam: true });
   const [reIngest, setReIngest] = useState(false);
@@ -19,13 +20,17 @@ export default function SettingsScreen() {
         <p className="text-slate-500 mt-1 text-[14px] mb-8">{isAR ? 'فصّل خصوصي على ذوقك.' : 'Tailor 5sosy to how you study.'}</p>
 
         <SettingSection title={isAR ? 'اللغة والاتجاه' : 'Language & direction'} icon="🌐">
-          <Row label={isAR ? 'لغة الواجهة' : 'Interface language'}>
-            <Segmented
-              options={[{ id: 'ar', label: 'العربية' }, { id: 'en', label: 'English' }]}
-              value={locale}
-              onChange={(v) => setLocale(v as 'ar' | 'en')}
-            />
-          </Row>
+          <div className="py-1">
+            <div className="text-[13.5px] font-semibold text-slate-900 mb-1">
+              {isAR ? 'لغة الواجهة' : 'Interface language'}
+            </div>
+            <div className="text-[11.5px] text-slate-500 mb-3">
+              {isAR
+                ? 'اختار اللغة اللي عايز تستخدم بيها التطبيق. الاتجاه (يمين/شمال) بيتظبط تلقائياً حسب اللغة.'
+                : 'Pick the language for the app. Direction (LTR/RTL) follows the language automatically.'}
+            </div>
+            <LanguageSwitcher variant="grid" />
+          </div>
           <Row label={isAR ? 'لهجة TTS' : 'TTS accent'} sub={isAR ? 'الصوت اللي 5sosy بيشرح بيه' : "Voice 5sosy uses to read lessons"}>
             <Segmented
               options={[{ id: 'eg', label: isAR ? 'مصري' : 'Egyptian', glyph: '🇪🇬' }, { id: 'msa', label: isAR ? 'فصحى' : 'MSA', glyph: 'ع' }]}
