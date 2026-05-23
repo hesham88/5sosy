@@ -84,7 +84,7 @@ gcloud run jobs deploy $Job `
   --command python `
   --args sync_job_main.py `
   --set-env-vars $envVars `
-  --set-secrets "GOOGLE_API_KEY=gemini-api-key:latest"
+  --set-secrets "GOOGLE_API_KEY=gemini-api-key:latest,MONGODB_URI=mongodb-uri:latest"
 
 if ($LASTEXITCODE -ne 0) {
   Write-Host "Job deploy failed." -ForegroundColor Red

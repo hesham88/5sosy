@@ -465,7 +465,8 @@ async def run_sync_pipeline(
                 completed_count = 0
                 async def format_and_track(page_num, page_bytes):
                     nonlocal completed_count
-                    res = await formatter_agent.format_single_page(page_num, page_bytes, page_semaphore)
+                    async with page_semaphore:
+                        res = await formatter_agent.format_single_page(page_num, page_bytes)
                     async with status_lock:
                         completed_count += 1
                         if total_pages > 0:

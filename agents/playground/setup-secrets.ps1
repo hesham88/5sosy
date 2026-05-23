@@ -13,6 +13,7 @@ param(
   [string]$Project = "khsosy",
   [string]$GeminiKey,
   [string]$AgentsKey,
+  [string]$MongoUri,
   [switch]$Force
 )
 
@@ -30,6 +31,19 @@ if (-not $GeminiKey) {
 if (-not $GeminiKey) {
   Write-Host "GOOGLE_API_KEY not found. Provide -GeminiKey or set it in .env first." -ForegroundColor Red
   exit 1
+}
+
+# Resolve MongoDB URI: param -> .env MONGODB_URI
+if (-not $MongoUri) {
+  if (Test-Path ".env") {
+    $line = Select-String -Path .env -Pattern '^MONGODB_URI=' | Select-Object -First 1
+    if ($line) {
+      $val = ($line.Line -replace '^MONGODB_URI=', '').Trim('"').Trim("'")
+      if ($val -and $val -ne "fetch_from_secret_manager") {
+        $MongoUri = $val
+      }
+    }
+  }
 }
 
 # Resolve shared-secret API key: param -> random 32-byte hex
@@ -68,11 +82,18 @@ function Ensure-Secret($name, $value) {
 
 Ensure-Secret "gemini-api-key" $GeminiKey
 Ensure-Secret "khsosybot-api-key" $AgentsKey
+if ($MongoUri) {
+  Ensure-Secret "mongodb-uri" $MongoUri
+}
 
-# Grant the Cloud Run runtime SA access to read both secrets.
+# Grant the Cloud Run runtime SA access to read the secrets.
 $projectNumber = gcloud projects describe $Project --format="value(projectNumber)"
 $runtimeSa = "$projectNumber-compute@developer.gserviceaccount.com"
-foreach ($secret in @("gemini-api-key", "khsosybot-api-key")) {
+$secretsToGrant = @("gemini-api-key", "khsosybot-api-key")
+if ($MongoUri -or (gcloud secrets describe mongodb-uri --project $Project 2>$null)) {
+  $secretsToGrant += "mongodb-uri"
+}
+foreach ($secret in $secretsToGrant) {
   gcloud secrets add-iam-policy-binding $secret `
     --project $Project `
     --member "serviceAccount:$runtimeSa" `

@@ -77,7 +77,7 @@ gcloud run deploy $Service `
   --concurrency 10 `
   --timeout 3600 `
   --set-env-vars $envVars `
-  --set-secrets "GOOGLE_API_KEY=gemini-api-key:latest,AGENTS_API_KEY=khsosybot-api-key:latest"
+  --set-secrets "GOOGLE_API_KEY=gemini-api-key:latest,AGENTS_API_KEY=khsosybot-api-key:latest,MONGODB_URI=mongodb-uri:latest"
 
 if ($LASTEXITCODE -ne 0) {
   Write-Host "Deploy failed." -ForegroundColor Red

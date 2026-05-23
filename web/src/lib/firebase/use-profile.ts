@@ -23,20 +23,51 @@ export function useProfile(): ProfileState {
       setLoading(false);
       return;
     }
-    setLoading(true);
-    const { db } = getFirebase();
-    const unsub = onSnapshot(
-      doc(db, 'users', user.uid),
-      (snap) => {
-        setProfile(snap.exists() ? (snap.data() as UserDoc) : null);
-        setLoading(false);
-      },
-      (err) => {
-        console.error('useProfile snapshot error', err);
-        setLoading(false);
-      }
-    );
-    return () => unsub();
+
+    const provider = (process.env.NEXT_PUBLIC_DATABASE_PROVIDER || 'firestore').toLowerCase();
+
+    if (provider === 'mongodb') {
+      let active = true;
+      const fetchProfile = async () => {
+        try {
+          setLoading(true);
+          const token = await user.getIdToken();
+          const res = await fetch('/api/users/profile', {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+          if (res.ok && active) {
+            const data = await res.json();
+            setProfile(data);
+          }
+        } catch (err) {
+          console.error('Failed to fetch profile from MongoDB API:', err);
+        } finally {
+          if (active) setLoading(false);
+        }
+      };
+
+      fetchProfile();
+      return () => {
+        active = false;
+      };
+    } else {
+      setLoading(true);
+      const { db } = getFirebase();
+      const unsub = onSnapshot(
+        doc(db, 'users', user.uid),
+        (snap) => {
+          setProfile(snap.exists() ? (snap.data() as UserDoc) : null);
+          setLoading(false);
+        },
+        (err) => {
+          console.error('useProfile snapshot error', err);
+          setLoading(false);
+        }
+      );
+      return () => unsub();
+    }
   }, [user, authLoading]);
 
   return { profile, loading: authLoading || loading };

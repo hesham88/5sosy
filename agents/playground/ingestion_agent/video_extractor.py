@@ -67,15 +67,23 @@ class VideoExtractorAgent:
                 "term": item.get("term", "").strip(),
                 "youtubeUrl": youtube_url,
                 "sourceUrl": "https://ellibrary.moe.gov.eg/video/",
-                "createdAt": firestore.SERVER_TIMESTAMP
+                "createdAt": datetime.now(timezone.utc) if os.getenv("DATABASE_PROVIDER") == "mongodb" else firestore.SERVER_TIMESTAMP
             }
 
             try:
-                # Write to Firestore
-                videos_coll.document(v_id).set(video_doc)
+                # Write to DB based on provider
+                provider = os.getenv("DATABASE_PROVIDER", "firestore").lower()
+                if provider == "mongodb":
+                    from shared.mongodb_client import get_mongodb_client
+                    _, mongo_db = get_mongodb_client()
+                    video_doc["_id"] = v_id
+                    mongo_db["videos"].replace_one({"_id": v_id}, video_doc, upsert=True)
+                else:
+                    videos_coll.document(v_id).set(video_doc)
                 videos_processed.append(video_doc)
             except Exception as e:
                 print(f"[VideoExtractor] Failed to save video doc {v_id} ({title}): {e}")
 
-        print(f"[VideoExtractor] Successfully saved {len(videos_processed)} videos to Firestore.")
+        print(f"[VideoExtractor] Successfully saved {len(videos_processed)} videos to DB.")
         return videos_processed
+

@@ -78,12 +78,35 @@ def get_book_id(gov_url: str, subject: str = "book") -> str:
         return f"book-{short_hash}"
 
 
-async def download_pdf(url: str) -> bytes:
-    headers = {"User-Agent": "Mozilla/5.0"}
+async def download_pdf(url: str, max_retries: int = 3) -> bytes:
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/pdf,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Referer": "https://moe.gov.eg/",
+    }
+    delay = 2.0
     async with httpx.AsyncClient(timeout=60.0) as client:
-        res = await client.get(url, headers=headers, follow_redirects=True)
-        res.raise_for_status()
-        return res.content
+        for attempt in range(max_retries):
+            try:
+                res = await client.get(url, headers=headers, follow_redirects=True)
+                res.raise_for_status()
+                return res.content
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code in (403, 429, 500, 502, 503, 504) and attempt < max_retries - 1:
+                    print(f"[Harvester] Download failed with {exc.response.status_code} for {url}. Retrying in {delay}s...")
+                    await asyncio.sleep(delay)
+                    delay *= 2
+                else:
+                    raise
+            except (httpx.RequestError, httpx.TimeoutException) as exc:
+                if attempt < max_retries - 1:
+                    print(f"[Harvester] Download connection error: {exc}. Retrying in {delay}s...")
+                    await asyncio.sleep(delay)
+                    delay *= 2
+                else:
+                    raise
+    raise Exception(f"Failed to download after {max_retries} attempts.")
 
 
 async def run_harvester_pipeline(
@@ -94,8 +117,16 @@ async def run_harvester_pipeline(
     """Crawl, scrape videos, download all MOE PDFs, upload to GCS, write
     skeleton book docs. Resumable via existing `books/{id}` docs with
     `storagePath` set."""
-    status_ref = db.collection("ingestion").document(STATUS_DOC)
-    existing = (status_ref.get().to_dict() or {})
+    provider = os.getenv("DATABASE_PROVIDER", "firestore").lower()
+    mongo_db = None
+    if provider == "mongodb":
+        from shared.mongodb_client import get_mongodb_client
+        _, mongo_db = get_mongodb_client()
+        existing = mongo_db["ingestion"].find_one({"_id": STATUS_DOC}) or {}
+    else:
+        status_ref = db.collection("ingestion").document(STATUS_DOC)
+        existing = (status_ref.get().to_dict() or {})
+        
     logs = existing.get("logs", [])
 
     status_lock = asyncio.Lock()
@@ -115,19 +146,28 @@ async def run_harvester_pipeline(
             if log_text:
                 _append_log(log_text, log_status)
             updates.setdefault("logs", logs[-LOGS_CAP:])
-            updates.setdefault("lastHeartbeatAt", firestore.SERVER_TIMESTAMP)
             loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, lambda: status_ref.update(updates))
+            if provider == "mongodb":
+                updates["lastHeartbeatAt"] = datetime.now(timezone.utc)
+                await loop.run_in_executor(None, lambda: mongo_db["ingestion"].update_one(
+                    {"_id": STATUS_DOC}, {"$set": updates}, upsert=True
+                ))
+            else:
+                updates.setdefault("lastHeartbeatAt", firestore.SERVER_TIMESTAMP)
+                await loop.run_in_executor(None, lambda: status_ref.update(updates))
 
     async def _is_paused() -> bool:
         loop = asyncio.get_running_loop()
-        doc = await loop.run_in_executor(None, status_ref.get)
-        d = doc.to_dict() or {}
+        if provider == "mongodb":
+            d = await loop.run_in_executor(None, lambda: mongo_db["ingestion"].find_one({"_id": STATUS_DOC}) or {})
+        else:
+            doc = await loop.run_in_executor(None, status_ref.get)
+            d = doc.to_dict() or {}
         return bool(d.get("pausedByRequest")) or d.get("status") == "paused"
 
     _append_log("Harvester pipeline started.", "info")
 
-    status_ref.set({
+    initial_status = {
         "status": "running",
         "pausedByRequest": False,
         "logs": logs,
@@ -138,11 +178,19 @@ async def run_harvester_pipeline(
         "percentage": 0.0,
         "activeBookTitle": "",
         "progressMessage": "Crawling MOE portal...",
-        "startedAt": firestore.SERVER_TIMESTAMP,
-        "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
-        "executionName": existing.get("executionName", ""),
         "errorMessage": "",
-    }, merge=False)
+    }
+    
+    if provider == "mongodb":
+        initial_status["startedAt"] = datetime.now(timezone.utc)
+        initial_status["lastHeartbeatAt"] = datetime.now(timezone.utc)
+        initial_status["executionName"] = existing.get("executionName", "")
+        mongo_db["ingestion"].replace_one({"_id": STATUS_DOC}, initial_status, upsert=True)
+    else:
+        initial_status["startedAt"] = firestore.SERVER_TIMESTAMP
+        initial_status["lastHeartbeatAt"] = firestore.SERVER_TIMESTAMP
+        initial_status["executionName"] = existing.get("executionName", "")
+        status_ref.set(initial_status, merge=False)
 
     try:
         # 1. Crawl
@@ -175,11 +223,17 @@ async def run_harvester_pipeline(
         loop = asyncio.get_running_loop()
         def _existing_storage_paths() -> Dict[str, str]:
             out: Dict[str, str] = {}
-            for d in db.collection("books").stream():
-                data = d.to_dict() or {}
-                sp = data.get("storagePath") or ""
-                if sp.startswith("gs://"):
-                    out[d.id] = sp
+            if provider == "mongodb":
+                for d in mongo_db["books"].find({}):
+                    sp = d.get("storagePath") or ""
+                    if sp.startswith("gs://"):
+                        out[d.get("_id")] = sp
+            else:
+                for d in db.collection("books").stream():
+                    data = d.to_dict() or {}
+                    sp = data.get("storagePath") or ""
+                    if sp.startswith("gs://"):
+                        out[d.id] = sp
             return out
         already = await loop.run_in_executor(None, _existing_storage_paths)
         await _update(
@@ -250,7 +304,7 @@ async def run_harvester_pipeline(
                 year_val = int(year_match.group(1)) if year_match else 2026
 
                 def _write_skeleton() -> None:
-                    db.collection("books").document(b_id).set({
+                    skeleton_doc = {
                         "id": b_id,
                         "title": b_title,
                         "stage": book_data.get("stage", ""),
@@ -265,9 +319,16 @@ async def run_harvester_pipeline(
                         "status": "downloaded",
                         "pages": 0,
                         "chapters": [],
-                        "createdAt": firestore.SERVER_TIMESTAMP,
-                        "updatedAt": firestore.SERVER_TIMESTAMP,
-                    }, merge=True)
+                    }
+                    if provider == "mongodb":
+                        skeleton_doc["_id"] = b_id
+                        skeleton_doc["createdAt"] = datetime.now(timezone.utc)
+                        skeleton_doc["updatedAt"] = datetime.now(timezone.utc)
+                        mongo_db["books"].replace_one({"_id": b_id}, skeleton_doc, upsert=True)
+                    else:
+                        skeleton_doc["createdAt"] = firestore.SERVER_TIMESTAMP
+                        skeleton_doc["updatedAt"] = firestore.SERVER_TIMESTAMP
+                        db.collection("books").document(b_id).set(skeleton_doc, merge=True)
 
                 await asyncio.get_running_loop().run_in_executor(None, _write_skeleton)
 

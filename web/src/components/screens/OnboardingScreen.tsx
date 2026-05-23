@@ -207,7 +207,21 @@ export default function OnboardingScreen() {
           onboardingCompletedAt: serverTimestamp()
         };
 
-        await setDoc(userRef, profileWrite, { merge: true });
+        const provider = (process.env.NEXT_PUBLIC_DATABASE_PROVIDER || 'firestore').toLowerCase();
+
+        if (provider === 'mongodb') {
+          const token = await user.getIdToken();
+          await fetch('/api/users/profile', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'content-type': 'application/json'
+            },
+            body: JSON.stringify(profileWrite)
+          });
+        } else {
+          await setDoc(userRef, profileWrite, { merge: true });
+        }
 
         router.replace(`/${locale}/home`);
       } catch (e) {

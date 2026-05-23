@@ -6,7 +6,7 @@ import { getFirebase } from '@/lib/firebase/client';
 
 /* ───────────────────────── types ───────────────────────── */
 
-type JobKind = 'harvester' | 'analyzer';
+type JobKind = 'harvester' | 'analyzer' | 'migration';
 type JobCommand = 'start' | 'pause' | 'resume' | 'stop' | 'reset';
 type JobStatus = 'idle' | 'running' | 'paused' | 'completed' | 'error';
 
@@ -29,6 +29,16 @@ export type PipelineJobStatus = {
   startedAt?: Timestamp | { toMillis?: () => number } | null;
   lastHeartbeatAt?: Timestamp | { toMillis?: () => number } | null;
   logs?: Array<{ timestamp?: string; text?: string; status?: string; agent?: string }>;
+  results?: {
+    books?: number;
+    book_pages?: number;
+    users?: number;
+    [key: string]: any;
+  };
+  evaluation?: {
+    passed?: boolean;
+    [key: string]: any;
+  };
 };
 
 type JobCardConfig = {
@@ -58,6 +68,15 @@ const CARDS: JobCardConfig[] = [
     titleEN: 'Analyze Books',
     subAR: 'استخراج المحتوى صفحة بصفحة مباشرة من التخزين وفهرسته',
     subEN: 'Stream pages directly from storage, OCR + embed + index',
+    primaryMetric: 'indexed',
+  },
+  {
+    kind: 'migration',
+    icon: '🔄',
+    titleAR: 'مهمة ترحيل البيانات',
+    titleEN: 'Data Migration',
+    subAR: 'ترحيل البيانات بالكامل من قاعدة Firestore الحالية إلى MongoDB',
+    subEN: 'Migrate all data from Firestore to the new MongoDB cluster',
     primaryMetric: 'indexed',
   },
 ];
@@ -145,10 +164,11 @@ type Props = { isAR: boolean };
 export default function PipelineConsole({ isAR }: Props) {
   const [harvester, setHarvester] = useState<PipelineJobStatus | null>(null);
   const [analyzer, setAnalyzer] = useState<PipelineJobStatus | null>(null);
-  const [busy, setBusy] = useState<Record<JobKind, JobCommand | null>>({ harvester: null, analyzer: null });
+  const [migration, setMigration] = useState<PipelineJobStatus | null>(null);
+  const [busy, setBusy] = useState<Record<JobKind, JobCommand | null>>({ harvester: null, analyzer: null, migration: null });
   const [nowTick, setNowTick] = useState(Date.now());
 
-  // Firestore real-time listeners on the two status docs
+  // Firestore real-time listeners on the three status docs
   useEffect(() => {
     try {
       const { db } = getFirebase();
@@ -162,9 +182,15 @@ export default function PipelineConsole({ isAR }: Props) {
         (snap) => setAnalyzer(snap.exists() ? (snap.data() as PipelineJobStatus) : null),
         (err) => console.error('[pipeline] analyzer listener failed:', err),
       );
+      const unsubM = onSnapshot(
+        doc(db, 'ingestion', 'migration_status'),
+        (snap) => setMigration(snap.exists() ? (snap.data() as PipelineJobStatus) : null),
+        (err) => console.error('[pipeline] migration listener failed:', err),
+      );
       return () => {
         unsubH();
         unsubA();
+        unsubM();
       };
     } catch (e) {
       console.error('[pipeline] init failed:', e);
@@ -199,6 +225,7 @@ export default function PipelineConsole({ isAR }: Props) {
   const statuses: Record<JobKind, PipelineJobStatus | null> = {
     harvester,
     analyzer,
+    migration,
   };
 
   return (
@@ -290,7 +317,7 @@ function JobCard({ cfg, isAR, status, stale, busy, onCommand }: JobCardProps) {
   // Reset is always available except mid-run; we still show it as a destructive secondary action.
   const showStart = s === 'idle' || s === 'completed' || !status;
   const showPause = s === 'running';
-  const showResume = s === 'paused' || s === 'error';
+  const showResume = (s === 'paused' || s === 'error') && cfg.kind !== 'migration';
   const showStop = s === 'running' || s === 'paused';
   const showReset = s !== 'running';
 
@@ -344,7 +371,11 @@ function JobCard({ cfg, isAR, status, stale, busy, onCommand }: JobCardProps) {
           )}
           {showReset && (
             <CtrlBtn tone="ghost" busy={busy === 'reset'} onClick={() => {
-              const msg = cfg.kind === 'harvester'
+              const msg = cfg.kind === 'migration'
+                ? (isAR
+                    ? 'هل تريد ترحيل البيانات مع إعادة ضبط قاعدة MongoDB بالكامل؟ هذا الإجراء سيقوم بمسح الجداول في MongoDB والبدء من جديد.'
+                    : 'Wipe all target MongoDB collections and start the migration from scratch?')
+                : cfg.kind === 'harvester'
                 ? (isAR
                     ? 'إعادة ضبط كاملة لجمع الكتب — سيتم حذف جميع كتب وملفات المزامنة. تأكيد؟'
                     : 'Reset the harvester? This wipes all books + PDFs from Firestore (storage objects kept).')
@@ -368,12 +399,12 @@ function JobCard({ cfg, isAR, status, stale, busy, onCommand }: JobCardProps) {
               {isAR ? 'التقدم' : 'Progress'}
             </span>
             <div className="flex items-center gap-3 text-[11px] text-slate-600">
-              {s === 'running' && perMin > 0 && (
+              {s === 'running' && cfg.kind !== 'migration' && perMin > 0 && (
                 <span className="font-mono">
                   ⚡ {perMin.toFixed(1)} {isAR ? 'كتاب/د' : 'books/min'}
                 </span>
               )}
-              {s === 'running' && etaSec > 0 && (
+              {s === 'running' && cfg.kind !== 'migration' && etaSec > 0 && (
                 <span className="font-mono text-slate-500">
                   ⏱ ETA {fmtDuration(etaSec, isAR)}
                 </span>
@@ -396,23 +427,42 @@ function JobCard({ cfg, isAR, status, stale, busy, onCommand }: JobCardProps) {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <Stat label={isAR ? 'إجمالي' : 'Total'} value={total} tone="slate" />
-          <Stat
-            label={cfg.primaryMetric === 'downloaded'
-              ? (isAR ? 'تم التنزيل' : 'Downloaded')
-              : (isAR ? 'مفهرس' : 'Indexed')}
-            value={primary}
-            tone="emerald"
-          />
-          {cfg.primaryMetric === 'downloaded' && skipped > 0 && (
-            <Stat label={isAR ? 'متخطى' : 'Skipped'} value={skipped} tone="sky" />
-          )}
-          {cfg.primaryMetric === 'indexed' && (status?.totalPagesProcessed ?? 0) > 0 && (
-            <Stat label={isAR ? 'صفحات' : 'Pages'} value={status?.totalPagesProcessed ?? 0} tone="sky" />
-          )}
-          <Stat label={isAR ? 'فشل' : 'Failed'} value={failed} tone={failed > 0 ? 'rose' : 'slate'} />
-        </div>
+        {cfg.kind === 'migration' ? (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <Stat label={isAR ? 'الكتب المنقولة' : 'Books'} value={status?.results?.books ?? 0} tone="slate" />
+            <Stat label={isAR ? 'الصفحات المنقولة' : 'Pages'} value={status?.results?.book_pages ?? 0} tone="sky" />
+            <Stat label={isAR ? 'المستخدمين' : 'Users'} value={status?.results?.users ?? 0} tone="emerald" />
+            <Stat
+              label={isAR ? 'التحقق' : 'Validation'}
+              value={
+                s === 'completed'
+                  ? (isAR ? 'ناجح ✓' : 'Passed ✓')
+                  : s === 'error'
+                  ? (isAR ? 'فشل ❌' : 'Failed ❌')
+                  : (isAR ? 'معلق' : 'Pending')
+              }
+              tone={s === 'completed' ? 'emerald' : s === 'error' ? 'rose' : 'slate'}
+            />
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <Stat label={isAR ? 'إجمالي' : 'Total'} value={total} tone="slate" />
+            <Stat
+              label={cfg.primaryMetric === 'downloaded'
+                ? (isAR ? 'تم التنزيل' : 'Downloaded')
+                : (isAR ? 'مفهرس' : 'Indexed')}
+              value={primary}
+              tone="emerald"
+            />
+            {cfg.primaryMetric === 'downloaded' && skipped > 0 && (
+              <Stat label={isAR ? 'متخطى' : 'Skipped'} value={skipped} tone="sky" />
+            )}
+            {cfg.primaryMetric === 'indexed' && (status?.totalPagesProcessed ?? 0) > 0 && (
+              <Stat label={isAR ? 'صفحات' : 'Pages'} value={status?.totalPagesProcessed ?? 0} tone="sky" />
+            )}
+            <Stat label={isAR ? 'فشل' : 'Failed'} value={failed} tone={failed > 0 ? 'rose' : 'slate'} />
+          </div>
+        )}
 
         {/* Active book line */}
         {status?.activeBookTitle && (
@@ -511,7 +561,7 @@ function CtrlBtn({
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: number; tone: 'slate' | 'emerald' | 'sky' | 'rose' }) {
+function Stat({ label, value, tone }: { label: string; value: number | string; tone: 'slate' | 'emerald' | 'sky' | 'rose' }) {
   const palette = {
     slate:   'bg-slate-50 text-slate-700 border-slate-100',
     emerald: 'bg-emerald-50 text-emerald-700 border-emerald-100',
@@ -521,7 +571,9 @@ function Stat({ label, value, tone }: { label: string; value: number; tone: 'sla
   return (
     <div className={`rounded-xl border px-3 py-2 ${palette}`}>
       <div className="text-[10px] font-bold uppercase tracking-wider opacity-70">{label}</div>
-      <div className="text-[18px] font-extrabold leading-tight mt-0.5">{value.toLocaleString()}</div>
+      <div className="text-[18px] font-extrabold leading-tight mt-0.5">
+        {typeof value === 'number' ? value.toLocaleString() : value}
+      </div>
     </div>
   );
 }

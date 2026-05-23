@@ -38,6 +38,14 @@ env:
     secret: khsosybot-api-key
     availability: [RUNTIME]
 
+  - variable: MONGODB_URI
+    secret: mongodb-uri
+    availability: [RUNTIME]
+
+  - variable: DATABASE_PROVIDER
+    value: firestore
+    availability: [BUILD, RUNTIME]
+
   # Legacy 5-agent stack (orchestrator/ingestion/pedagogy/assessment/av) — still
   # falls back to simulated payloads until the production agents land.
   # When ready, set NEXT_PUBLIC_AGENTS_BASE_URL and AGENTS_SERVICE_TOKEN here.

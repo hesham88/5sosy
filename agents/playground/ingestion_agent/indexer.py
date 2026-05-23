@@ -173,13 +173,13 @@ class StorageIndexerAgent:
         Returns:
             Dict summarizing indexing results.
         """
-        print(f"[Indexer] Starting Firestore indexing for book {book_id}...")
+        print(f"[Indexer] Starting database indexing for book {book_id}...")
         
         # 1. Sanitize and truncate pages
         for p in formatted_pages:
             t = _sanitize_text(p.get("text", ""))
             if len(t) > 150000:
-                t = t[:150000] + "\n\n...[Content Truncated due to Firestore Size Limits]..."
+                t = t[:150000] + "\n\n...[Content Truncated due to size limits]..."
             p["text"] = t
 
         # 2. Assemble main lean book doc
@@ -198,6 +198,142 @@ class StorageIndexerAgent:
         # Get localized metadata
         localized = await self._get_localized_metadata(metadata)
         
+        provider = os.getenv("DATABASE_PROVIDER", "firestore").lower()
+        
+        if provider == "mongodb":
+            from datetime import datetime, timezone
+            from shared.mongodb_client import get_mongodb_client
+            _, mongo_db = get_mongodb_client()
+            
+            book_doc = {
+                "_id": book_id,
+                "id": book_id,
+                "title": title,
+                "stage": stage,
+                "grade": grade,
+                "term": term,
+                "subject": subject,
+                "type": book_type,
+                "language": language,
+                "year": year,
+                "govUrl": gov_url,
+                "storagePath": gcs_uri,
+                "chapters": chapters,
+                "pages": len(formatted_pages),
+                "status": "indexing",
+                "createdAt": datetime.now(timezone.utc),
+                "updatedAt": datetime.now(timezone.utc),
+                **localized
+            }
+            
+            print(f"[Indexer] Writing books/{book_id} lean metadata to MongoDB...")
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, lambda: mongo_db["books"].replace_one({"_id": book_id}, book_doc, upsert=True))
+            
+            # Write joined full rich text to book_contents
+            consolidated_pages = [
+                f"--- PAGE {p.get('pageNumber')} ---\n\n{p.get('text', '')}"
+                for p in formatted_pages
+            ]
+            full_rich_text = _sanitize_text("\n\n".join(consolidated_pages))
+            
+            content_payload = {
+                "_id": f"{book_id}_full",
+                "bookId": book_id,
+                "pagesList": formatted_pages,
+                "text": full_rich_text,
+                "updatedAt": datetime.now(timezone.utc),
+            }
+            
+            print(f"[Indexer] Writing book content to MongoDB...")
+            await loop.run_in_executor(None, lambda: mongo_db["book_contents"].replace_one({"_id": content_payload["_id"]}, content_payload, upsert=True))
+            
+            # Generate page embeddings
+            print(f"[Indexer] Generating page embeddings in parallel for {len(formatted_pages)} pages...")
+            embed_semaphore = asyncio.Semaphore(20)
+            
+            embed_completed = 0
+            async def embed_single_page(p):
+                nonlocal embed_completed
+                p_num = p.get("pageNumber")
+                p_text = p.get("text", "")
+                emb = await self._embed_with_retry(p_text)
+                embed_completed += 1
+                if progress_callback and len(formatted_pages) > 0:
+                    current_prog = 80 + int((embed_completed / len(formatted_pages)) * 11)
+                    if embed_completed == len(formatted_pages) or embed_completed % max(1, len(formatted_pages) // 10) == 0:
+                        await progress_callback(current_prog)
+                return p_num, emb
+
+            embed_tasks = [embed_single_page(p) for p in formatted_pages]
+            embed_results = await asyncio.gather(*embed_tasks)
+            embeddings_map = {p_num: emb for p_num, emb in embed_results}
+            
+            # Write pages in batches to MongoDB
+            print(f"[Indexer] Writing page records in batches to MongoDB...")
+            batch_size = 20
+            total_chunks = (len(formatted_pages) + batch_size - 1) // batch_size
+            chunk_count = 0
+            
+            for i in range(0, len(formatted_pages), batch_size):
+                chunk = formatted_pages[i:i + batch_size]
+                
+                def _write_mongo_batch(pages_chunk, chunk_idx):
+                    from pymongo import ReplaceOne
+                    requests = []
+                    for p in pages_chunk:
+                        p_num = p.get("pageNumber")
+                        p_text = p.get("text", "")
+                        emb_vector = embeddings_map.get(p_num, [0.0] * EMBEDDING_DIM)
+                        
+                        page_doc = {
+                            "_id": f"{book_id}_page_{p_num}",
+                            "pageNumber": p_num,
+                            "text": p_text,
+                            "bookId": book_id,
+                            "bookTitle": title,
+                            "grade": grade,
+                            "subject": subject,
+                            "stage": stage,
+                            "term": term,
+                            "type": book_type,
+                            "language": language,
+                            "year": year,
+                            "embedding": emb_vector, # list of floats for Mongo
+                            "arStage": localized.get("arStage", stage),
+                            "enStage": localized.get("enStage", stage),
+                            "arGrade": localized.get("arGrade", grade),
+                            "enGrade": localized.get("enGrade", grade),
+                            "arTerm": localized.get("arTerm", term),
+                            "enTerm": localized.get("enTerm", term),
+                            "arType": localized.get("arType", book_type),
+                            "enType": localized.get("enType", book_type),
+                            "arSubject": localized.get("arSubject", subject),
+                            "enSubject": localized.get("enSubject", subject)
+                        }
+                        requests.append(ReplaceOne({"_id": page_doc["_id"]}, page_doc, upsert=True))
+                    mongo_db["book_pages"].bulk_write(requests)
+                    
+                await loop.run_in_executor(None, _write_mongo_batch, chunk, chunk_count)
+                chunk_count += 1
+                if progress_callback and total_chunks > 0:
+                    current_prog = 91 + int((chunk_count / total_chunks) * 8)
+                    await progress_callback(current_prog)
+                    
+            print(f"[Indexer] Finalizing status to indexed for book in MongoDB: {book_id}")
+            await loop.run_in_executor(None, lambda: mongo_db["books"].update_one(
+                {"_id": book_id},
+                {"$set": {"status": "indexed", "updatedAt": datetime.now(timezone.utc)}}
+            ))
+            
+            print(f"[Indexer] Finished indexing book in MongoDB: {book_id}")
+            return {
+                "bookId": book_id,
+                "status": "indexed",
+                "totalPages": len(formatted_pages)
+            }
+
+        # Otherwise, default to Firestore
         book_doc = {
             "id": book_id,
             "title": title,
@@ -356,3 +492,4 @@ class StorageIndexerAgent:
             "status": "indexed",
             "totalPages": len(formatted_pages)
         }
+

@@ -19,15 +19,33 @@ export default function ProfilePage() {
 
   useEffect(() => {
     if (!user) return;
-    const { db } = getFirebase();
-    getDoc(doc(db, 'users', user.uid)).then((s) => {
-      if (s.exists()) {
-        const d = s.data();
-        setDoc1(d);
-        setName((d.displayName as string) ?? '');
-        setUsername((d.username as string) ?? '');
-      }
-    });
+    const provider = (process.env.NEXT_PUBLIC_DATABASE_PROVIDER || 'firestore').toLowerCase();
+
+    if (provider === 'mongodb') {
+      user.getIdToken().then((token) => {
+        fetch('/api/users/profile', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+        .then((res) => res.json())
+        .then((d) => {
+          if (d && !d.error) {
+            setDoc1(d);
+            setName(d.displayName ?? '');
+            setUsername(d.username ?? '');
+          }
+        });
+      });
+    } else {
+      const { db } = getFirebase();
+      getDoc(doc(db, 'users', user.uid)).then((s) => {
+        if (s.exists()) {
+          const d = s.data();
+          setDoc1(d);
+          setName((d.displayName as string) ?? '');
+          setUsername((d.username as string) ?? '');
+        }
+      });
+    }
   }, [user]);
 
   if (loading) return <ChromeLayout><div className="p-10 text-slate-500">…</div></ChromeLayout>;
@@ -35,9 +53,33 @@ export default function ProfilePage() {
 
   const save = async () => {
     setSaving(true); setSaved(false);
-    const { db } = getFirebase();
-    await updateDoc(doc(db, 'users', user.uid), { displayName: name, username: username.toLowerCase().trim() });
-    setSaving(false); setSaved(true);
+    const provider = (process.env.NEXT_PUBLIC_DATABASE_PROVIDER || 'firestore').toLowerCase();
+
+    if (provider === 'mongodb') {
+      try {
+        const token = await user.getIdToken();
+        const res = await fetch('/api/users/profile', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'content-type': 'application/json'
+          },
+          body: JSON.stringify({ displayName: name, username: username.toLowerCase().trim() })
+        });
+        if (res.ok) {
+          setSaved(true);
+          const updated = { ...doc1, displayName: name, username: username.toLowerCase().trim() };
+          setDoc1(updated);
+        }
+      } catch (err) {
+        console.error('Failed to save profile via MongoDB API:', err);
+      }
+    } else {
+      const { db } = getFirebase();
+      await updateDoc(doc(db, 'users', user.uid), { displayName: name, username: username.toLowerCase().trim() });
+      setSaved(true);
+    }
+    setSaving(false);
     setTimeout(() => setSaved(false), 1500);
   };
 

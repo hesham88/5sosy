@@ -770,6 +770,7 @@ async def ingestion_sync(
 
 HARVESTER_JOB_NAME = os.getenv("HARVESTER_JOB_NAME", "khsosybot-get-books")
 ANALYZER_JOB_NAME = os.getenv("ANALYZER_JOB_NAME", "khsosybot-analyze-books")
+MIGRATION_JOB_NAME = os.getenv("MIGRATION_JOB_NAME", "khsosybot-migration")
 
 
 def _job_config(kind: str) -> tuple[str, str]:
@@ -778,17 +779,20 @@ def _job_config(kind: str) -> tuple[str, str]:
         return HARVESTER_JOB_NAME, "harvester_status"
     if kind == "analyzer":
         return ANALYZER_JOB_NAME, "analyzer_status"
+    if kind == "migration":
+        return MIGRATION_JOB_NAME, "migration_status"
     raise HTTPException(status_code=400, detail=f"Unknown job kind: {kind}")
+
 
 
 def _job_resource(job_name: str) -> str:
     return f"projects/{SYNC_JOB_PROJECT}/locations/{SYNC_JOB_REGION}/jobs/{job_name}"
 
 
-def _launch_job(job_name: str) -> str:
+def _launch_job(job_name: str, overrides: dict | None = None) -> str:
     """Trigger a fresh Cloud Run Job execution. Same pattern as _launch_sync_job."""
     client = run_v2.JobsClient()
-    operation = client.run_job(name=_job_resource(job_name))
+    operation = client.run_job(name=_job_resource(job_name), overrides=overrides)
     try:
         meta = operation.metadata
         if meta is not None:
@@ -1030,13 +1034,47 @@ async def _handle_job_command(kind: str, command: str) -> dict:
                 "kind": "harvester",
                 "message": f"Harvester reset. Wiped {deleted} book documents (incl. subcollections).",
             }
-        else:  # analyzer
+        elif kind == "analyzer":
             reset_count = await loop.run_in_executor(None, _reset_books_for_analyzer)
             return {
                 "ok": True,
                 "status": "idle",
                 "kind": "analyzer",
                 "message": f"Analyzer reset. Reverted {reset_count} books to status='downloaded' (PDFs kept).",
+            }
+        elif kind == "migration":
+            _seed_job_running(status_doc_id, "Launching migration job with DB reset...")
+            try:
+                overrides = {
+                    "container_overrides": [
+                        {
+                            "env": [
+                                {"name": "RESET_DB", "value": "TRUE"}
+                            ]
+                        }
+                    ]
+                }
+                execution_name = await loop.run_in_executor(
+                    None, lambda: _launch_job(job_name, overrides)
+                )
+            except Exception as exc:
+                status_ref.update({
+                    "status": "error",
+                    "errorMessage": f"Failed to launch migration reset: {exc}",
+                    "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
+                })
+                raise HTTPException(status_code=500, detail=f"Failed to launch migration reset: {exc}")
+            
+            update_fields: dict = {"lastHeartbeatAt": firestore.SERVER_TIMESTAMP}
+            if execution_name:
+                update_fields["executionName"] = execution_name
+            status_ref.update(update_fields)
+            return {
+                "ok": True,
+                "status": "running",
+                "kind": kind,
+                "executionName": execution_name,
+                "message": "Migration job execution launched with DB reset.",
             }
 
     raise HTTPException(status_code=400, detail=f"Unknown {kind} command: {command}")
@@ -1065,6 +1103,16 @@ async def ingestion_analyzer(
     return await _handle_job_command("analyzer", req.command)
 
 
+@app.post("/v1/ingestion/migration")
+async def ingestion_migration(
+    req: JobCommandRequest,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> dict:
+    _require_api_key(x_api_key)
+    return await _handle_job_command("migration", req.command)
+
+
+
 # In-memory cache for page embeddings
 _pages_cache: list[dict] = []
 _cache_loaded: bool = False
@@ -1074,6 +1122,37 @@ _cache_lock = asyncio.Lock()
 async def load_pages_cache():
     global _pages_cache, _cache_loaded, _last_cache_load_time
     async with _cache_lock:
+        provider = os.getenv("DATABASE_PROVIDER", "firestore").lower()
+        if provider == "mongodb":
+            print("Loading pages cache from MongoDB collection 'book_pages'...")
+            try:
+                from shared.mongodb_client import get_mongodb_client
+                _, mongo_db = get_mongodb_client()
+                loop = asyncio.get_running_loop()
+                docs = await loop.run_in_executor(None, lambda: list(mongo_db["book_pages"].find({})))
+                new_cache = []
+                for data in docs:
+                    if "embedding" in data and data["embedding"]:
+                        emb_list = list(data["embedding"])
+                        new_cache.append({
+                            "bookId": data.get("bookId"),
+                            "bookTitle": data.get("bookTitle", "Unknown Book"),
+                            "pageNumber": data.get("pageNumber"),
+                            "text": data.get("text", ""),
+                            "embedding": emb_list,
+                            "grade": data.get("grade", ""),
+                            "subject": data.get("subject", ""),
+                            "language": data.get("language", "ar"),
+                            "year": data.get("year", 2026)
+                        })
+                _pages_cache = new_cache
+                _cache_loaded = True
+                _last_cache_load_time = time.time()
+                print(f"Pages cache loaded from MongoDB. Total pages: {len(_pages_cache)}")
+            except Exception as e:
+                print(f"Error loading pages cache from MongoDB: {e}")
+            return
+
         print("Loading pages cache from Firestore collection group 'pages'...")
         try:
             pages_ref = db.collection_group("pages")
@@ -1104,6 +1183,7 @@ async def load_pages_cache():
                     })
             _pages_cache = new_cache
             _cache_loaded = True
+
             _last_cache_load_time = time.time()
             print(f"Pages cache loaded. Total pages: {len(_pages_cache)}")
         except Exception as e:

@@ -1,18 +1,14 @@
-# Deploy the khsosybot-get-books Cloud Run Job — discovers MOE books + videos,
-# downloads the raw PDFs to GCS, writes skeleton `books/{id}` docs with
-# `status='downloaded'`. No PDF parsing happens here. The analyzer job consumes
-# the skeleton docs and does the heavy work via a GCS volume mount.
-#
-# Shares the same Docker image as the service and analyzer jobs;
-# `--command python --args harvester_job_main.py` selects the entrypoint.
+# Deploy the khsosybot-migration Cloud Run Job — the Firestore-to-MongoDB migration job.
+# Shares the same Docker image as the main service;
+# `--command python --args migration_job_main.py` selects the entrypoint.
 #
 # Usage:
-#   .\deploy-harvester.ps1                    # default: us-east4, project khsosy
-#   .\deploy-harvester.ps1 -Region us-central1
+#   .\deploy-migration.ps1                    # default: us-east4, project khsosy
+#   .\deploy-migration.ps1 -Region us-central1
 
 [CmdletBinding()]
 param(
-  [string]$Job     = "khsosybot-get-books",
+  [string]$Job     = "khsosybot-migration",
   [string]$Region  = "us-east4",
   [string]$Project = "khsosy"
 )
@@ -20,13 +16,13 @@ param(
 Set-Location -Path $PSScriptRoot
 
 Write-Host "Enabling required APIs..." -ForegroundColor Cyan
-gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com `
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com secretmanager.googleapis.com `
   --project $Project | Out-Null
 
 $projectNumber = gcloud projects describe $Project --format="value(projectNumber)"
 $buildSa = "$projectNumber-compute@developer.gserviceaccount.com"
 
-# Same SA bindings as the legacy sync job: build, datastore, storage write.
+# Bind necessary SA roles for building and executing datastore/storage operations.
 gcloud projects add-iam-policy-binding $Project `
   --member "serviceAccount:$buildSa" `
   --role "roles/cloudbuild.builds.builder" `
@@ -35,10 +31,12 @@ gcloud projects add-iam-policy-binding $Project `
   --member "serviceAccount:$buildSa" `
   --role "roles/datastore.user" `
   --condition=None --quiet | Out-Null
-gcloud projects add-iam-policy-binding $Project `
-  --member "serviceAccount:$buildSa" `
-  --role "roles/storage.objectAdmin" `
-  --condition=None --quiet | Out-Null
+
+# Verify the secret exists
+$secretExists = gcloud secrets describe mongodb-uri --project $Project 2>$null
+if (-not $secretExists) {
+  Write-Host "WARNING: Secret 'mongodb-uri' does not exist in project $Project! Please run setup-secrets or create it first." -ForegroundColor Yellow
+}
 
 $repoExists = gcloud artifacts repositories describe cloud-run-source-deploy `
   --project $Project --location $Region --format "value(name)" 2>$null
@@ -50,14 +48,11 @@ if (-not $repoExists) {
     --description "Cloud Run source deploys" | Out-Null
 }
 
-# Comma-escape: `^@^` overrides gcloud's default comma delimiter so the env
-# value can contain literal commas if we ever add any.
-$envVars = "^@^GEMINI_MODEL=gemini-3.1-flash-lite@GOOGLE_GENAI_USE_VERTEXAI=FALSE@FIRESTORE_PROJECT=$Project@FIRESTORE_DATABASE=(default)@GCS_BUCKET=khsosy.firebasestorage.app@MALLOC_TRIM_THRESHOLD_=131072@SYNC_WORKER_COUNT=3"
+$envVars = "^@^GEMINI_MODEL=gemini-3.1-flash-lite@GOOGLE_GENAI_USE_VERTEXAI=FALSE@FIRESTORE_PROJECT=$Project@FIRESTORE_DATABASE=(default)"
 
 Write-Host "Deploying Cloud Run Job $Job to $Region in $Project (builds via Cloud Build)..." -ForegroundColor Cyan
 
-# Harvester is I/O bound (download + GCS upload). 4 GiB / 2 vCPU is generous;
-# per-worker peak is ~150 MB while a download finishes, freed immediately.
+# Resource parameters for migration job (4 GiB memory, 2 CPUs)
 gcloud run jobs deploy $Job `
   --source . `
   --project $Project `
@@ -70,19 +65,18 @@ gcloud run jobs deploy $Job `
   --parallelism 1 `
   --tasks 1 `
   --command python `
-  --args harvester_job_main.py `
+  --args migration_job_main.py `
   --set-env-vars $envVars `
   --set-secrets "GOOGLE_API_KEY=gemini-api-key:latest,MONGODB_URI=mongodb-uri:latest"
 
 if ($LASTEXITCODE -ne 0) {
-  Write-Host "Harvester job deploy failed." -ForegroundColor Red
+  Write-Host "Migration job deploy failed." -ForegroundColor Red
   exit $LASTEXITCODE
 }
 
 Write-Host ""
-Write-Host "Harvester job deployed. Launch with:" -ForegroundColor Yellow
+Write-Host "Migration job deployed successfully." -ForegroundColor Green
+Write-Host "Launch with:" -ForegroundColor Yellow
 Write-Host "  gcloud run jobs execute $Job --region $Region --project $Project"
-Write-Host ""
-Write-Host "Or from the web UI: Books page -> Sync Console -> Harvester card -> Start."
 Write-Host "Tail logs:"
 Write-Host "  gcloud logging tail `"resource.type=cloud_run_job AND resource.labels.job_name=$Job`""
