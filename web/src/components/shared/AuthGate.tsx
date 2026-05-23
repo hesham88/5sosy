@@ -55,7 +55,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
     if (isOnboarding) return; // signed-in but onboarding-in-progress: let them through
 
-    if (profile && profile.onboardingCompleted !== true) {
+    if (!profile || profile.onboardingCompleted !== true) {
       router.replace(`/${locale}/onboarding`);
       return;
     }
@@ -89,7 +89,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (isOnboarding) return <>{children}</>;
 
-  if (profile && profile.onboardingCompleted !== true) return null;
+  if (!profile || profile.onboardingCompleted !== true) return null;
 
   return <>{children}</>;
 }

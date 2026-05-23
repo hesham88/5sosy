@@ -84,6 +84,76 @@ export default function BooksScreen() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    const provider = (process.env.NEXT_PUBLIC_DATABASE_PROVIDER || 'firestore').toLowerCase();
+
+    if (provider === 'mongodb') {
+      let active = true;
+
+      const fetchBooksAndVideos = async () => {
+        try {
+          setBooksLoading(true);
+          const res = await fetch('/api/books');
+          if (res.ok && active) {
+            const data = await res.json();
+            setDbBooks(data);
+          }
+        } catch (err) {
+          console.error('Failed to fetch books from MongoDB:', err);
+        } finally {
+          if (active) setBooksLoading(false);
+        }
+
+        try {
+          setVideosLoading(true);
+          const res = await fetch('/api/videos');
+          if (res.ok && active) {
+            const data = await res.json();
+            setDbVideos(data);
+          }
+        } catch (err) {
+          console.error('Failed to fetch videos from MongoDB:', err);
+        } finally {
+          if (active) setVideosLoading(false);
+        }
+      };
+
+      const fetchStatus = async () => {
+        try {
+          const res = await fetch('/api/ingestion/status');
+          if (res.ok && active) {
+            const data = await res.json();
+            setSyncStatus(data);
+          }
+        } catch (err) {
+          console.error('Failed to fetch sync status from MongoDB:', err);
+        }
+      };
+
+      fetchBooksAndVideos();
+      fetchStatus();
+
+      const interval = setInterval(() => {
+        if (!active) return;
+        fetchStatus();
+        
+        // Only refresh books if ingestion is active to avoid unnecessary backend load
+        fetch('/api/books')
+          .then((res) => {
+            if (res.ok) return res.json();
+            throw new Error();
+          })
+          .then((data) => {
+            if (active && Array.isArray(data)) setDbBooks(data);
+          })
+          .catch(() => {});
+      }, 5000);
+
+      return () => {
+        active = false;
+        clearInterval(interval);
+      };
+    }
+
     try {
       const { db } = getFirebase();
       const statusDoc = doc(db, 'ingestion', 'status');
