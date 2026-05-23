@@ -47,6 +47,10 @@ from google.genai import types  # noqa: E402
 
 from onboarding_agent.agent import root_agent as onboarding_agent  # noqa: E402
 from orchestrator_agent.agent import root_agent as orchestrator_agent  # noqa: E402
+from translation_agent.agent import root_agent as translation_agent  # noqa: E402
+from language_detection_agent.detector import (  # noqa: E402
+    SUPPORTED_LANGUAGES as TRANSLATE_SUPPORTED,
+)
 
 APP_NAME = "khsosybot"
 ONBOARDING_APP_NAME = "khsosybot-onboarding"
@@ -77,6 +81,12 @@ _runner = Runner(
 _onboarding_runner = Runner(
     agent=onboarding_agent,
     app_name=ONBOARDING_APP_NAME,
+    session_service=_session_service,
+)
+TRANSLATION_APP_NAME = "khsosybot-translation"
+_translation_runner = Runner(
+    agent=translation_agent,
+    app_name=TRANSLATION_APP_NAME,
     session_service=_session_service,
 )
 
@@ -212,6 +222,94 @@ def _infer_intent(trace: list[dict]) -> str:
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /v1/translate — axis-4 session-scoped translation surface.
+# Never persists. Frontend caches the result in React/session state for the
+# duration of the reading session and drops it on navigation away.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TranslateRequest(BaseModel):
+    text: str
+    source_locale: str
+    target_locale: str
+    mode: str = "pedagogical"  # or "literal"
+    context: str = ""
+    username: str = "guest"
+    session_id: str | None = None
+
+
+@app.post("/v1/translate")
+async def translate(
+    req: TranslateRequest,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> dict:
+    _require_api_key(x_api_key)
+
+    src = (req.source_locale or "").lower()
+    tgt = (req.target_locale or "").lower()
+    if src not in TRANSLATE_SUPPORTED or tgt not in TRANSLATE_SUPPORTED:
+        raise HTTPException(
+            status_code=400,
+            detail=f"locale must be one of {list(TRANSLATE_SUPPORTED)}",
+        )
+    if req.mode not in ("pedagogical", "literal"):
+        raise HTTPException(status_code=400, detail="mode must be pedagogical|literal")
+    if src == tgt:
+        # No work to do — return verbatim so the caller's cache stays coherent.
+        return {
+            "status": "skipped",
+            "translated": req.text,
+            "source_locale": src,
+            "target_locale": tgt,
+            "mode": req.mode,
+            "dir": "rtl" if tgt == "ar" else "ltr",
+            "lang": tgt,
+            "persist": False,
+        }
+
+    session_id = req.session_id or uuid.uuid4().hex
+    existing = await _session_service.get_session(
+        app_name=TRANSLATION_APP_NAME, user_id=req.username, session_id=session_id
+    )
+    if existing is None:
+        await _session_service.create_session(
+            app_name=TRANSLATION_APP_NAME, user_id=req.username, session_id=session_id
+        )
+
+    # Tool args are passed inline so the model has zero degrees of freedom over
+    # source/target/mode — it only owns the rewriting.
+    prelude = (
+        f"[metadata] username={req.username} source_locale={src} "
+        f"target_locale={tgt} mode={req.mode}\n"
+        f"[context] {req.context}\n\n"
+        f"[text to translate]\n{req.text}"
+    )
+    message = types.Content(role="user", parts=[types.Part(text=prelude)])
+
+    translated_text = ""
+    async for event in _translation_runner.run_async(
+        user_id=req.username, session_id=session_id, new_message=message
+    ):
+        if not event.content or not event.content.parts:
+            continue
+        for part in event.content.parts:
+            text = getattr(part, "text", None)
+            if text and event.is_final_response():
+                translated_text = text.strip()
+
+    return {
+        "status": "ok" if translated_text else "error",
+        "translated": translated_text,
+        "source_locale": src,
+        "target_locale": tgt,
+        "mode": req.mode,
+        "dir": "rtl" if tgt == "ar" else "ltr",
+        "lang": tgt,
+        "persist": False,
+        "session_id": session_id,
+    }
 
 
 @app.post("/v1/chat")

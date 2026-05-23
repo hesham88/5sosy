@@ -11,6 +11,7 @@ import { getFirebase } from '@/lib/firebase/client';
 import { dicebearUrl, randomSeed } from '@/lib/avatar';
 import { AVATAR_SEED_PALETTE, AVATAR_STYLES } from '@/constants/onboarding';
 import type { AvatarStyle } from '@/lib/types';
+import { dirFor } from '@/i18n/config';
 
 type InputType = 'text' | 'number' | 'choice' | 'avatar';
 
@@ -201,13 +202,13 @@ export default function OnboardingScreen() {
       try {
         const { db } = getFirebase();
         const userRef = doc(db, 'users', user.uid);
+        const provider = (process.env.NEXT_PUBLIC_DATABASE_PROVIDER || 'firestore').toLowerCase();
+
         const profileWrite: Record<string, unknown> = {
           ...finalProfile,
           onboardingCompleted: true,
-          onboardingCompletedAt: serverTimestamp()
+          onboardingCompletedAt: provider === 'mongodb' ? new Date().toISOString() : serverTimestamp()
         };
-
-        const provider = (process.env.NEXT_PUBLIC_DATABASE_PROVIDER || 'firestore').toLowerCase();
 
         if (provider === 'mongodb') {
           const token = await user.getIdToken();

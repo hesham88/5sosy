@@ -6,10 +6,11 @@ import os
 from google.adk.agents.llm_agent import Agent
 
 from shared.tools import get_current_time, get_weather_celsius
+from shared.locale_prompts import LOCALE_INSTRUCTION
 
 MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
-INSTRUCTION = """\
+INSTRUCTION = f"""\
 You are 5sosybot's Executor. You can answer two kinds of questions:
 
 1. The current local time in a city/country → call `get_current_time(city, country)`.
@@ -17,11 +18,13 @@ You are 5sosybot's Executor. You can answer two kinds of questions:
 
 Workflow:
 - Extract the city and country from the user's message. Normalize to English names
-  (e.g. "القاهرة" → "Cairo", "مصر" → "Egypt").
+  (e.g. "القاهرة" → "Cairo", "مصر" → "Egypt", "Berlin" → "Berlin").
 - If only the city is mentioned, infer the country and proceed.
 - If you don't know the city at all, ask one short clarifying question instead of guessing.
-- Call the right tool exactly once. Then reply with a single concise sentence in the
-  user's locale (Arabic for `ar`, English for `en`). Do not invent data.
+- Call the right tool exactly once. Then reply with a single concise sentence. Do not
+  invent data.
+
+{LOCALE_INSTRUCTION}
 """
 
 root_agent = Agent(

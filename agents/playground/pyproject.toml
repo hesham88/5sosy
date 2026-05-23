@@ -47,5 +47,7 @@ include = [
     "analyzer_agent*",
     "pdf_parser_agent*",
     "migration_agent*",
+    "language_detection_agent*",
+    "translation_agent*",
     "shared*"
 ]

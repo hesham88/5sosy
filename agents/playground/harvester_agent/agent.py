@@ -27,6 +27,7 @@ from google.cloud import firestore, storage
 
 from ingestion_agent.crawler import CrawlerAgent
 from ingestion_agent.video_extractor import VideoExtractorAgent
+from language_detection_agent.detector import detect_language
 
 try:
     if hasattr(sys.stdout, "reconfigure"):
@@ -67,13 +68,10 @@ def get_book_id(gov_url: str, subject: str = "book") -> str:
         name_without_ext = filename.rsplit(".", 1)[0]
         year_match = re.search(r"/(\d{4})/", gov_url)
         year = year_match.group(1) if year_match else "2026"
-        lang = "ar"
-        sub_lower = subject.lower()
-        f_lower = name_without_ext.lower()
-        if "english" in sub_lower or "_en_" in f_lower or f_lower.endswith("_en") or "english" in f_lower:
-            lang = "en"
-        elif "french" in sub_lower or "_fr_" in f_lower or f_lower.endswith("_fr") or "french" in f_lower:
-            lang = "fr"
+        # 7-language detector (ar/en/fr/de/es/it/zh) — shared with the backfill
+        # script and the analyzer, so newly harvested books inherit the same
+        # classification rules used to repair existing docs.
+        lang = detect_language(subject=subject, filename=filename)
         slug = re.sub(r"[^a-z0-9]+", "-", subject.lower()).strip("-")[:40] or "book"
         return f"{slug}-{lang}-{year}-{short_hash}"
     except Exception:
@@ -294,14 +292,9 @@ async def run_harvester_pipeline(
 
                 gcs_uri = await asyncio.get_running_loop().run_in_executor(None, _upload)
 
-                # Detect language code once for the skeleton doc
-                lang_code = "ar"
-                f_lower = filename.lower()
-                sub_lower = subject.lower()
-                if "english" in sub_lower or "_en" in f_lower:
-                    lang_code = "en"
-                elif "french" in sub_lower or "_fr" in f_lower:
-                    lang_code = "fr"
+                # Detect language code once for the skeleton doc using the
+                # shared 7-language detector (ar/en/fr/de/es/it/zh).
+                lang_code = detect_language(subject=subject, filename=filename)
 
                 year_match = re.search(r"/(\d{4})/", gov_url)
                 year_val = int(year_match.group(1)) if year_match else 2026

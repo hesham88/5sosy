@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '@/components/shared/Providers';
+import { dirFor } from '@/i18n/config';
 
 type StepType = 'text' | 'function_call' | 'function_response' | 'transfer';
 
@@ -402,7 +403,7 @@ export function FiveSosyBot() {
       {open && (
         <div
           className="fixed bottom-5 end-5 z-50 w-[min(380px,calc(100vw-2.5rem))] h-[min(560px,calc(100vh-2.5rem))] flex flex-col bg-white rounded-2xl border border-slate-200 shadow-2xl shadow-slate-900/20 overflow-hidden"
-          dir={isAR ? 'rtl' : 'ltr'}
+          dir={dirFor(locale)}
         >
           <div
             className="px-4 py-3 text-white flex items-center gap-3"

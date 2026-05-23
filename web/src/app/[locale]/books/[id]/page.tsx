@@ -11,6 +11,7 @@ import { Card, Btn, SubjectChip } from '@/components/shared/atoms';
 import { SUBJECT_META } from '@/constants/subjects';
 import { callAgent } from '@/lib/agents';
 import type { Book } from '@/lib/types';
+import { LocaleBlock } from '@/i18n/LocaleBlock';
 
 export default function Page({ params }: { params: Promise<{ locale: string; id: string }> }) {
   const { locale, id } = use(params);
@@ -33,6 +34,36 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
   const [searchLoading, setSearchLoading] = useState(false);
 
   useEffect(() => {
+    const provider = (process.env.NEXT_PUBLIC_DATABASE_PROVIDER || 'firestore').toLowerCase();
+
+    if (provider === 'mongodb') {
+      let active = true;
+      setLoading(true);
+      
+      fetch(`/api/books/${id}`)
+        .then((res) => {
+          if (res.ok) return res.json();
+          throw new Error('Book fetch failed');
+        })
+        .then((data) => {
+          if (active) {
+            setBook(data.book);
+            setPages(data.pages || []);
+          }
+        })
+        .catch((err) => {
+          console.error('Failed to load book from MongoDB API:', err);
+          if (active) setBook(null);
+        })
+        .finally(() => {
+          if (active) setLoading(false);
+        });
+
+      return () => {
+        active = false;
+      };
+    }
+
     const { db } = getFirebase();
     const bookRef = doc(db, 'books', id);
 
@@ -298,11 +329,19 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
           {/* Reading Content */}
           <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6 slim">
             {currentPage ? (
-              <article className="max-w-3xl mx-auto prose prose-slate">
+              // Reading pane follows the BOOK's language (axis 2), not the
+              // user's UI locale (axis 1). A French user reading an Arabic
+              // physics book sees this pane render RTL with the Arabic font;
+              // the surrounding chrome stays in their UI locale.
+              <LocaleBlock
+                locale={book.language || 'ar'}
+                as="article"
+                className="max-w-3xl mx-auto prose prose-slate"
+              >
                 <div className="text-[16px] leading-[1.85] text-slate-800 whitespace-pre-line text-start font-medium selection:bg-sky-200">
                   {currentPage.text}
                 </div>
-              </article>
+              </LocaleBlock>
             ) : (
               <div className="text-center py-24 text-slate-400 italic">
                 {isAR ? 'صفحة فارغة أو غير متوفرة.' : 'Page content is empty or unavailable.'}

@@ -9,6 +9,7 @@ import { SUBJECT_META, HUE } from '@/constants/subjects';
 import { HOME_PLAN, WEAK_TOPICS, UPCOMING, ACTIVITY } from '@/constants/seed-data';
 import { callAgent } from '@/lib/agents';
 import { useProfile } from '@/lib/firebase/use-profile';
+import { dirFor } from '@/i18n/config';
 
 export default function HomeScreen() {
   const { isAR, t, locale, pulseStreak } = useApp();
@@ -66,7 +67,7 @@ export default function HomeScreen() {
 const IntentInput = forwardRef<HTMLTextAreaElement, {
   value: string; setValue: (v: string) => void; onSubmit: (v: string) => void; parsing: boolean;
 }>(function IntentInput({ value, setValue, onSubmit, parsing }, ref) {
-  const { t, isAR } = useApp();
+  const { t, isAR, locale } = useApp();
   const parseLines: AgentLogLine[] = [
     { agent: 'Orchestrator', text: 'Received intent. tokenizing Egyptian Arabic…' },
     { agent: 'Orchestrator', text: 'Subject = Physics · Topic = Gas Laws · Urgency = 48h', status: 'ok' },
@@ -88,7 +89,7 @@ const IntentInput = forwardRef<HTMLTextAreaElement, {
           onChange={(e) => setValue(e.target.value)}
           placeholder={t.home.intentPh}
           className="w-full bg-transparent resize-none px-5 pt-6 pb-2 text-[16px] text-slate-900 placeholder:text-slate-400 focus:outline-none"
-          dir={isAR ? 'rtl' : 'ltr'}
+          dir={dirFor(locale)}
         />
         <div className="flex items-center gap-2 px-3 pb-3">
           <button className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100" title={isAR ? 'صوت' : 'Voice'}>🎙️</button>
