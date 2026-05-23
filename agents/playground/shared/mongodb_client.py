@@ -28,7 +28,19 @@ def get_mongodb_client() -> tuple[MongoClient, Database]:
             )
     
     if _client is None:
-        _client = MongoClient(uri)
+        # Specify serverSelectionTimeoutMS=5000 (5s) so connection failures (e.g. firewalls, 
+        # un-whitelisted IP addresses) fail fast instead of hanging.
+        _client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+        # Eagerly verify connection immediately to catch connection or firewall issues early.
+        try:
+            _client.admin.command("ping")
+        except Exception as conn_err:
+            _client = None  # Clear cache so next call can retry
+            raise ConnectionError(
+                f"Failed to connect to MongoDB. This is typically due to the client IP "
+                f"not being whitelisted in the MongoDB Atlas Console (under Network Access -> IP Access List).\n"
+                f"Connection Error: {conn_err}"
+            ) from conn_err
         
     # Get database name from the connection string or default to 'khsosy'
     # For Atlas cluster URIs: mongodb+srv://.../dbname?options

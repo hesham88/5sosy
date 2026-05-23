@@ -43,7 +43,11 @@ env:
     availability: [RUNTIME]
 
   - variable: DATABASE_PROVIDER
-    value: firestore
+    value: mongodb
+    availability: [BUILD, RUNTIME]
+
+  - variable: NEXT_PUBLIC_DATABASE_PROVIDER
+    value: mongodb
     availability: [BUILD, RUNTIME]
 
   # Legacy 5-agent stack (orchestrator/ingestion/pedagogy/assessment/av) — still
