@@ -34,7 +34,6 @@ class VideoExtractorAgent:
 
         if not data:
             print("[VideoExtractor] Video catalog is empty or failed to fetch. Falling back to local videos_fallback.json...")
-            import os
             import json
             fallback_path = os.path.join(os.path.dirname(__file__), "videos_fallback.json")
             if os.path.exists(fallback_path):
