@@ -15,11 +15,13 @@ COPY ingestion_agent ./ingestion_agent
 COPY harvester_agent ./harvester_agent
 COPY analyzer_agent ./analyzer_agent
 COPY pdf_parser_agent ./pdf_parser_agent
+COPY migration_agent ./migration_agent
 COPY shared ./shared
 COPY server.py ./
 COPY sync_job_main.py ./
 COPY harvester_job_main.py ./
 COPY analyzer_job_main.py ./
+COPY migration_job_main.py ./
 
 RUN pip install .
 
