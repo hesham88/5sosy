@@ -34,9 +34,10 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const firstSegment = useMemo(() => pathname.split('/').filter(Boolean)[1] ?? '', [pathname]);
   const isSignIn = firstSegment === SIGN_IN_SEGMENT;
   const isOnboarding = firstSegment === ONBOARDING_SEGMENT;
+  const isLanding = firstSegment === '';
 
   useEffect(() => {
-    if (isSignIn) return;
+    if (isSignIn || isLanding) return;
     if (authLoading) return;
 
     if (!user) {
@@ -65,6 +66,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     }
   }, [
     isSignIn,
+    isLanding,
     isOnboarding,
     authLoading,
     user,
@@ -77,7 +79,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     signOut
   ]);
 
-  if (isSignIn) return <>{children}</>;
+  if (isSignIn || isLanding) return <>{children}</>;
 
   if (authLoading || (user && profileLoading)) {
     return (

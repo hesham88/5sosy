@@ -109,3 +109,83 @@ body { background: #f8fafc; color: #0f172a; }
 .bar-fill { transition: width .8s cubic-bezier(.2,.7,.2,1); }
 
 [dir='rtl'] .flip-x { transform: scaleX(-1); }
+
+/* Glassmorphism & custom landing page animations */
+.glass-panel {
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.glass-panel-light {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.glass-glow-magenta {
+  box-shadow: 0 0 40px -10px rgba(225, 0, 126, 0.25);
+}
+.glass-glow-indigo {
+  box-shadow: 0 0 40px -10px rgba(77, 0, 255, 0.25);
+}
+.glass-glow-mint {
+  box-shadow: 0 0 40px -10px rgba(56, 239, 125, 0.25);
+}
+.glass-glow-coral {
+  box-shadow: 0 0 40px -10px rgba(255, 160, 122, 0.25);
+}
+
+.text-glow-magenta {
+  text-shadow: 0 0 12px rgba(225, 0, 126, 0.6);
+}
+.text-glow-indigo {
+  text-shadow: 0 0 12px rgba(77, 0, 255, 0.6);
+}
+.text-glow-mint {
+  text-shadow: 0 0 12px rgba(56, 239, 125, 0.6);
+}
+
+/* Background animated gradient blobs */
+.animate-blob-slow {
+  animation: blob-drift 25s infinite alternate ease-in-out;
+}
+.animate-blob-slower {
+  animation: blob-drift-reverse 35s infinite alternate ease-in-out;
+}
+@keyframes blob-drift {
+  0% { transform: translate(0px, 0px) scale(1); }
+  33% { transform: translate(40px, -60px) scale(1.15); }
+  66% { transform: translate(-30px, 30px) scale(0.9); }
+  100% { transform: translate(0px, 0px) scale(1); }
+}
+@keyframes blob-drift-reverse {
+  0% { transform: translate(0px, 0px) scale(1); }
+  33% { transform: translate(-50px, 40px) scale(0.85); }
+  66% { transform: translate(30px, -30px) scale(1.1); }
+  100% { transform: translate(0px, 0px) scale(1); }
+}
+
+/* Flow line animation for SVG arrows */
+.flow-line {
+  stroke-dasharray: 8 8;
+  animation: strokeFlow 15s linear infinite;
+}
+@keyframes strokeFlow {
+  to {
+    stroke-dashoffset: -200;
+  }
+}
+
+.glow-dot {
+  animation: dotMove 4s linear infinite;
+}
+@keyframes dotMove {
+  0% {
+    offset-distance: 0%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+
