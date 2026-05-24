@@ -12,7 +12,12 @@ export async function GET(req: Request) {
 
     if (provider === 'mongodb') {
       const { db } = await connectToDatabase();
-      const docs = await db.collection('books').find({}).toArray();
+      // Card view needs only metadata — never ship page text / embeddings /
+      // full content for 1533 books (that's what made the list crawl).
+      const docs = await db
+        .collection('books')
+        .find({}, { projection: { pagesList: 0, embedding: 0, embeddings: 0, content: 0, fullText: 0, rawText: 0, ocr: 0, pages_text: 0 } })
+        .toArray();
       const books: Book[] = docs.map((doc: any) => {
         const id = doc._id.toString();
         return bookFromFirestore(id, doc as any);

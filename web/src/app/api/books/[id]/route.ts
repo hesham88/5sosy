@@ -16,7 +16,10 @@ export async function GET(
 
     if (provider === 'mongodb') {
       const { db } = await connectToDatabase();
-      const bookDoc = await db.collection('books').findOne({ _id: id as any });
+      const bookDoc = await db.collection('books').findOne(
+        { _id: id as any },
+        { projection: { embedding: 0, embeddings: 0, fullText: 0, rawText: 0, ocr: 0 } }
+      );
       if (!bookDoc) {
         return NextResponse.json({ error: 'Book not found' }, { status: 404 });
       }
@@ -29,8 +32,12 @@ export async function GET(
       } else if (Array.isArray(bookDoc.pagesList)) {
         pages = bookDoc.pagesList;
       } else {
-        // Fallback to book_pages collection
-        const pagesDocs = await db.collection('book_pages').find({ bookId: id }).toArray();
+        // Fallback to book_pages collection — project text only; never pull the
+        // per-page embedding vectors (3072 floats each) into the reader payload.
+        const pagesDocs = await db
+          .collection('book_pages')
+          .find({ bookId: id }, { projection: { pageNumber: 1, text: 1, _id: 0 } })
+          .toArray();
         pages = pagesDocs.map((pd: any) => ({
           pageNumber: pd.pageNumber || 0,
           text: pd.text || '',
