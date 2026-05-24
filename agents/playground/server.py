@@ -76,6 +76,23 @@ async def _ensure_vector_index():
         loop = asyncio.get_running_loop()
         _, mdb = get_mongodb_client()
         coll = mdb["book_pages"]
+
+        # Regular compound index for fast bookId-scoped page queries (book-open,
+        # page navigation, bookId-filtered search). Idempotent. This is what fixes
+        # the 20-30s book open (was a full collection scan of 34k pages).
+        try:
+            await loop.run_in_executor(None, lambda: coll.create_index([("bookId", 1), ("pageNumber", 1)], name="bookId_pageNumber"))
+            print("ensure_vector_index: ensured book_pages {bookId,pageNumber} index")
+        except Exception as e:
+            print(f"ensure_vector_index: page index create failed (non-fatal): {e}")
+
+        # One-time cleanup of the smoke-test junk doc.
+        try:
+            await loop.run_in_executor(None, lambda: mdb["books"].delete_one({"_id": "__smoketest__"}))
+            await loop.run_in_executor(None, lambda: coll.delete_many({"bookId": "__smoketest__"}))
+        except Exception as e:
+            print(f"ensure_vector_index: smoketest cleanup failed (non-fatal): {e}")
+
         existing = await loop.run_in_executor(None, lambda: [ix.get("name") for ix in coll.list_search_indexes()])
 
         # 1) Atlas full-text index for fast fuzzy keyword search ($search) — replaces
@@ -347,34 +364,35 @@ async def translate(
         }
 
     session_id = req.session_id or uuid.uuid4().hex
-    existing = await _session_service.get_session(
-        app_name=TRANSLATION_APP_NAME, user_id=req.username, session_id=session_id
-    )
-    if existing is None:
-        await _session_service.create_session(
-            app_name=TRANSLATION_APP_NAME, user_id=req.username, session_id=session_id
-        )
 
-    # Tool args are passed inline so the model has zero degrees of freedom over
-    # source/target/mode — it only owns the rewriting.
-    prelude = (
-        f"[metadata] username={req.username} source_locale={src} "
-        f"target_locale={tgt} mode={req.mode}\n"
-        f"[context] {req.context}\n\n"
-        f"[text to translate]\n{req.text}"
+    # Direct, deterministic translation (the agent/tool round-trip hallucinated
+    # unrelated output). The model translates the EXACT provided text only.
+    src_name = _ASK_LOCALE_NAMES.get(src, src)
+    tgt_name = _ASK_LOCALE_NAMES.get(tgt, tgt)
+    mode_clause = (
+        "Translate naturally, preserving teaching intent; you may localize worked-example "
+        "numbers/units/place names where culturally helpful."
+        if req.mode == "pedagogical"
+        else "Translate literally, word-for-word, with no cultural adaptation."
     )
-    message = types.Content(role="user", parts=[types.Part(text=prelude)])
-
+    prompt = (
+        f"You are a precise translator for Egyptian school textbooks. Translate the TEXT below "
+        f"from {src_name} into {tgt_name}. {mode_clause} Keep mathematical equations, chemical "
+        f"formulas, code blocks, LaTeX, proper nouns, and the brand name '5sosy' unchanged. "
+        f"Preserve markdown structure. Output ONLY the translation — no preamble, no quotes, no notes."
+        + (f"\n\nCONTEXT: {req.context}" if req.context else "")
+        + f"\n\nTEXT:\n{req.text}"
+    )
     translated_text = ""
-    async for event in _translation_runner.run_async(
-        user_id=req.username, session_id=session_id, new_message=message
-    ):
-        if not event.content or not event.content.parts:
-            continue
-        for part in event.content.parts:
-            text = getattr(part, "text", None)
-            if text and event.is_final_response():
-                translated_text = text.strip()
+    try:
+        client = genai.Client()
+        resp = await client.aio.models.generate_content(
+            model=os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite"), contents=prompt
+        )
+        translated_text = (getattr(resp, "text", None) or "").strip()
+    except Exception as e:
+        print(f"translate: generation failed: {e}")
+        raise HTTPException(status_code=502, detail=f"translation failed: {e}")
 
     return {
         "status": "ok" if translated_text else "error",
@@ -1929,7 +1947,7 @@ async def parse_book_endpoint(
                     from shared.mongodb_client import get_mongodb_client
                     _, mdb = get_mongodb_client()
                     mdb["books"].update_one({"_id": req.bookId},
-                                            {"$set": {"status": "error", "errorMessage": str(e)[:500]}}, upsert=True)
+                                            {"$set": {"status": "error", "errorMessage": str(e)[:500]}}, upsert=False)
                 else:
                     db.collection("books").document(req.bookId).update({"status": "error", "errorMessage": str(e)[:500]})
             except Exception as inner:

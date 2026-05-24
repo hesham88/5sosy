@@ -10,7 +10,7 @@ export const runtime = 'nodejs';
 // ingestion adds books), so serving from cache turns repeat loads from seconds
 // into milliseconds. Shared per server instance.
 let _booksCache: { at: number; data: Book[] } | null = null;
-const BOOKS_TTL_MS = 120_000;
+const BOOKS_TTL_MS = 15_000;
 
 export async function GET(req: Request) {
   try {
@@ -19,7 +19,7 @@ export async function GET(req: Request) {
     if (provider === 'mongodb') {
       if (_booksCache && Date.now() - _booksCache.at < BOOKS_TTL_MS) {
         return NextResponse.json(_booksCache.data, {
-          headers: { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=120' },
+          headers: { 'Cache-Control': 'public, max-age=10, stale-while-revalidate=30' },
         });
       }
       const { db } = await connectToDatabase();
@@ -36,7 +36,7 @@ export async function GET(req: Request) {
       books.sort(compareBooks);
       _booksCache = { at: Date.now(), data: books };
       return NextResponse.json(books, {
-        headers: { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=120' },
+        headers: { 'Cache-Control': 'public, max-age=10, stale-while-revalidate=30' },
       });
     } else {
       // Default: Firestore

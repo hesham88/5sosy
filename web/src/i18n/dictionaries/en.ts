@@ -154,7 +154,10 @@ const dict = {
     insightsTab: 'Insights & Visualizer',
     resultsLabel: 'results',
     backToLibrary: 'Back to Library',
-    pageNavigation: 'Page Navigation'
+    pageNavigation: 'Page Navigation',
+    translate: 'Translate',
+    showOriginal: 'Show original',
+    translating: 'Translating…'
   },
   common: {
     loading: 'Loading…',

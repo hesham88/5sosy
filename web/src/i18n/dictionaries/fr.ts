@@ -154,7 +154,10 @@ const dict = {
     insightsTab: 'Statistiques',
     resultsLabel: 'résultats',
     backToLibrary: 'Retour à la bibliothèque',
-    pageNavigation: 'Navigation des pages'
+    pageNavigation: 'Navigation des pages',
+    translate: 'Traduire',
+    showOriginal: 'Afficher l’original',
+    translating: 'Traduction…'
   },
   common: {
     loading: 'Chargement…',

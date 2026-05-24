@@ -152,7 +152,10 @@ const dict = {
     insightsTab: 'الإحصائيات والتحليلات',
     resultsLabel: 'نتيجة',
     backToLibrary: 'العودة للمكتبة',
-    pageNavigation: 'فهرس الصفحات'
+    pageNavigation: 'فهرس الصفحات',
+    translate: 'ترجمة',
+    showOriginal: 'النص الأصلي',
+    translating: 'بترجم…'
   },
   common: {
     loading: 'بيحمّل…',

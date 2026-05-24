@@ -154,7 +154,10 @@ const dict = {
     insightsTab: '统计分析',
     resultsLabel: '结果',
     backToLibrary: '返回书库',
-    pageNavigation: '页面导航'
+    pageNavigation: '页面导航',
+    translate: '翻译',
+    showOriginal: '显示原文',
+    translating: '翻译中…'
   },
   common: {
     loading: '加载中…',

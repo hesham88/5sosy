@@ -21,6 +21,12 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
   const [pages, setPages] = useState<any[]>([]);            // sparse: only loaded pages
   const [pageCount, setPageCount] = useState(0);
   const [pageLoading, setPageLoading] = useState(false);
+
+  // Session-scoped translation (never persisted): translate each page to the
+  // user's UI locale on demand when the toggle is on.
+  const [translateOn, setTranslateOn] = useState(false);
+  const [translations, setTranslations] = useState<Record<number, { text: string; dir: string }>>({});
+  const [translating, setTranslating] = useState(false);
   const [loading, setLoading] = useState(true);
   const [currentPageNum, setCurrentPageNum] = useState<number>(1);
 
@@ -151,6 +157,27 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
     // `pages` intentionally omitted — we gate on the membership check above to avoid a refetch loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPageNum, book, id]);
+
+  // Translate the current page on demand (session-only) when the toggle is on.
+  useEffect(() => {
+    if (!translateOn || !book || !currentPage || !currentPage.text) return;
+    if (translations[currentPageNum]) return;
+    let active = true;
+    setTranslating(true);
+    fetch('/api/books/translate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: currentPage.text, source_locale: book.language || 'ar', target_locale: locale, mode: 'pedagogical' }),
+    })
+      .then(r => r.json())
+      .then(d => {
+        if (active && d?.translated) setTranslations(prev => ({ ...prev, [currentPageNum]: { text: d.translated, dir: d.dir || 'ltr' } }));
+      })
+      .catch(e => console.error('translate failed', e))
+      .finally(() => { if (active) setTranslating(false); });
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [translateOn, currentPageNum, currentPage?.text, book, locale]);
 
   // Handle local searching in book
   const handleLocalSearch = async () => {
@@ -334,6 +361,18 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
 
             <div className="flex items-center gap-2">
               <button
+                onClick={() => setTranslateOn(v => !v)}
+                className={`inline-flex items-center gap-1.5 text-[12px] font-bold px-3 h-9 rounded-full border transition ${
+                  translateOn
+                    ? 'bg-sky-600 text-white border-sky-600'
+                    : 'bg-white text-slate-700 border-slate-200 hover:border-sky-400'
+                }`}
+                title={translateOn ? t.books.showOriginal : t.books.translate}
+              >
+                <span>🌐</span>
+                <span className="hidden sm:inline">{translateOn ? t.books.showOriginal : t.books.translate}</span>
+              </button>
+              <button
                 disabled={currentPageNum <= 1}
                 onClick={() => setCurrentPageNum(prev => Math.max(1, prev - 1))}
                 className="w-9 h-9 rounded-full bg-white border border-slate-200 text-slate-700 hover:border-sky-500 disabled:opacity-50 transition grid place-items-center font-bold"
@@ -357,19 +396,38 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
                 <div className="w-8 h-8 border-2 border-sky-600 border-t-transparent rounded-full animate-spin" />
               </div>
             ) : currentPage ? (
-              // Reading pane follows the BOOK's language (axis 2), not the
-              // user's UI locale (axis 1). A French user reading an Arabic
-              // physics book sees this pane render RTL with the Arabic font;
-              // the surrounding chrome stays in their UI locale.
-              <LocaleBlock
-                locale={book.language || 'ar'}
-                as="article"
-                className="max-w-3xl mx-auto prose prose-slate"
-              >
-                <div className="text-[16px] leading-[1.85] text-slate-800 whitespace-pre-line text-start font-medium selection:bg-sky-200">
-                  {currentPage.text}
-                </div>
-              </LocaleBlock>
+              (() => {
+                const tr = translateOn ? translations[currentPageNum] : null;
+                const showTranslating = translateOn && !tr && translating;
+                if (showTranslating) {
+                  return (
+                    <div className="grid place-items-center py-24 gap-3 text-slate-500">
+                      <div className="w-7 h-7 border-2 border-sky-600 border-t-transparent rounded-full animate-spin" />
+                      <span className="text-[13px]">{t.books.translating}</span>
+                    </div>
+                  );
+                }
+                // Reading pane follows the BOOK's language unless a temporary
+                // translation to the user's locale is active.
+                const text = tr ? tr.text : currentPage.text;
+                const paneLocale = tr ? (locale as any) : (book.language || 'ar');
+                return (
+                  <>
+                    {tr && (
+                      <div className="max-w-3xl mx-auto mb-4 flex items-center gap-2 text-[11.5px] text-sky-700 bg-sky-50 border border-sky-100 rounded-lg px-3 py-1.5">
+                        <span>🌐</span>
+                        <span>{isAR ? 'نسخة مترجمة مؤقتة' : 'Temporary translation'}</span>
+                        <button onClick={() => setTranslateOn(false)} className="ms-auto font-bold hover:underline">{t.books.showOriginal}</button>
+                      </div>
+                    )}
+                    <LocaleBlock locale={paneLocale} as="article" className="max-w-3xl mx-auto prose prose-slate">
+                      <div className="text-[16px] leading-[1.85] text-slate-800 whitespace-pre-line text-start font-medium selection:bg-sky-200">
+                        {text}
+                      </div>
+                    </LocaleBlock>
+                  </>
+                );
+              })()
             ) : (
               <div className="text-center py-24 text-slate-400 italic">
                 {isAR ? 'صفحة فارغة أو غير متوفرة.' : 'Page content is empty or unavailable.'}
