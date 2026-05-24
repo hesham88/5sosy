@@ -13,6 +13,8 @@ const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 // answers to a uid), but does NOT require onboardingCompleted=true.
 const SIGN_IN_SEGMENT = 'sign-in';
 const ONBOARDING_SEGMENT = 'onboarding';
+// Fully public segments (no auth needed): landing (''), sign-in, and legal pages.
+const PUBLIC_SEGMENTS = new Set(['', SIGN_IN_SEGMENT, 'terms', 'privacy']);
 
 function lastLoginMillis(profile: { lastLoginAt?: unknown } | null): number | null {
   const v = profile?.lastLoginAt as
@@ -32,12 +34,11 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const { profile, loading: profileLoading, error: profileError } = useProfile();
 
   const firstSegment = useMemo(() => pathname.split('/').filter(Boolean)[1] ?? '', [pathname]);
-  const isSignIn = firstSegment === SIGN_IN_SEGMENT;
   const isOnboarding = firstSegment === ONBOARDING_SEGMENT;
-  const isLanding = firstSegment === '';
+  const isPublic = PUBLIC_SEGMENTS.has(firstSegment);
 
   useEffect(() => {
-    if (isSignIn || isLanding) return;
+    if (isPublic) return;
     if (authLoading) return;
 
     if (!user) {
@@ -65,8 +66,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       return;
     }
   }, [
-    isSignIn,
-    isLanding,
+    isPublic,
     isOnboarding,
     authLoading,
     user,
@@ -79,7 +79,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     signOut
   ]);
 
-  if (isSignIn || isLanding) return <>{children}</>;
+  if (isPublic) return <>{children}</>;
 
   if (authLoading || (user && profileLoading)) {
     return (
