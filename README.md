@@ -1,12 +1,12 @@
 # 5sosy — خصوصي
 
 Autonomous AI study assistant for Egyptian school students.
-Submission for the **Google for Startups AI Agents Challenge 2026, Track 1**.
 
-5sosy ingests Ministry-of-Education textbooks and orchestrates a 5-agent
+5sosy ingests Ministry-of-Education textbooks and orchestrates a multi-agent
 ensemble to democratize private tutoring and alternate to the current private-tutoring economy 
 where 81% of Egyptian secondary students currently rely on private tutors.
 
+//Pros to be added
 > Give it a declarative intent — *"اختبار فيزياء بعد ٤٨ ساعة ومش فاهم قانون الغازات"* —
 > and it builds a plan, lessons, adaptive quizzes, and a mock oral exam in
 > Egyptian Arabic.
@@ -219,9 +219,8 @@ See `web/src/app/[locale]/u/[username]/layout.tsx`.
 
 ## License
 
-Source available, pending Apache-2.0 — see `LICENSE` (to be added).
+Source available, see `LICENSE`.
 
 ## Authors
 
-Hesham · 5sosy — Built for the Google for Startups AI Agents Challenge 2026
-(submission deadline **2026-06-06**).
+Hesham Aboul-Feotuh · 5sosy.
