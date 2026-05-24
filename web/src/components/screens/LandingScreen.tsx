@@ -36,7 +36,6 @@ export default function LandingScreen() {
   // Authentication State
   const [busy, setBusy] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [scrolledPastHero, setScrolledPastHero] = useState(false);
 
   // Contact Us Form State
   const [contactName, setContactName] = useState('');
@@ -48,21 +47,6 @@ export default function LandingScreen() {
   const [hoveredAgent, setHoveredAgent] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'stack' | 'capabilities' | 'gamification'>('capabilities');
 
-  // Track scrolling to move buttons to header
-  useEffect(() => {
-    const handleScroll = () => {
-      const heroButtons = document.getElementById('hero-auth-buttons');
-      if (heroButtons) {
-        const rect = heroButtons.getBoundingClientRect();
-        // If the bottom of the hero buttons container has scrolled off-screen
-        setScrolledPastHero(rect.bottom < 0);
-      }
-    };
-    window.addEventListener('scroll', handleScroll);
-    // Initial check
-    handleScroll();
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
 
   // Auth helper
   const handleAuth = (type: 'google' | 'guest') => async () => {
@@ -297,9 +281,9 @@ export default function LandingScreen() {
                 <span>{isAR ? 'لوحة التحكم' : 'Dashboard'}</span>
                 <span className="rtl:rotate-180">➔</span>
               </button>
-            ) : scrolledPastHero ? (
-              // Floating Header Sign In elements when user scrolls past Hero buttons
-              <div className="flex items-center gap-2 animate-[fadeIn_0.3s_ease]">
+            ) : (
+              // Sign-in buttons always available in the nav bar.
+              <div className="flex items-center gap-2">
                 <button
                   onClick={handleAuth('google')}
                   disabled={busy !== null}
@@ -328,15 +312,6 @@ export default function LandingScreen() {
                   <span className="hidden md:inline">{isAR ? 'زائر' : 'Guest'}</span>
                 </button>
               </div>
-            ) : (
-              <a
-                href="#hero-auth-buttons"
-                className="relative group overflow-hidden bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white font-bold text-[13px] px-4 py-2 rounded-xl transition shadow-lg shadow-pink-500/10 flex items-center gap-1"
-              >
-                <span className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition" />
-                <span>{isAR ? 'ابدأ الآن' : 'Get Started'}</span>
-                <span className="rtl:rotate-180">➔</span>
-              </a>
             )}
           </div>
         </div>
