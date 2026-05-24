@@ -6,11 +6,22 @@ import type { Book } from '@/lib/types';
 
 export const runtime = 'nodejs';
 
+// In-memory TTL cache for the full catalog. The list changes rarely (only when
+// ingestion adds books), so serving from cache turns repeat loads from seconds
+// into milliseconds. Shared per server instance.
+let _booksCache: { at: number; data: Book[] } | null = null;
+const BOOKS_TTL_MS = 120_000;
+
 export async function GET(req: Request) {
   try {
     const provider = (process.env.DATABASE_PROVIDER || 'firestore').toLowerCase();
 
     if (provider === 'mongodb') {
+      if (_booksCache && Date.now() - _booksCache.at < BOOKS_TTL_MS) {
+        return NextResponse.json(_booksCache.data, {
+          headers: { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=120' },
+        });
+      }
       const { db } = await connectToDatabase();
       // Card view needs only metadata — never ship page text / embeddings /
       // full content for 1533 books (that's what made the list crawl).
@@ -23,7 +34,10 @@ export async function GET(req: Request) {
         return bookFromFirestore(id, doc as any);
       });
       books.sort(compareBooks);
-      return NextResponse.json(books);
+      _booksCache = { at: Date.now(), data: books };
+      return NextResponse.json(books, {
+        headers: { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=120' },
+      });
     } else {
       // Default: Firestore
       const { db } = getAdmin();

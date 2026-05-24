@@ -76,15 +76,34 @@ async def _ensure_vector_index():
         loop = asyncio.get_running_loop()
         _, mdb = get_mongodb_client()
         coll = mdb["book_pages"]
-        index_name = os.getenv("MONGO_VECTOR_INDEX", "vector_index")
         existing = await loop.run_in_executor(None, lambda: [ix.get("name") for ix in coll.list_search_indexes()])
+
+        # 1) Atlas full-text index for fast fuzzy keyword search ($search) — replaces
+        #    the unindexed $regex full scan (the 20-50s killer) with a sub-second
+        #    Lucene query that also tolerates typos.
+        text_index = os.getenv("MONGO_TEXT_INDEX", "text_index")
+        if text_index not in existing:
+            text_def = {"mappings": {"dynamic": False, "fields": {
+                "text": {"type": "string"},
+                "bookId": {"type": "token"},
+            }}}
+            try:
+                await loop.run_in_executor(
+                    None, lambda: coll.create_search_index(
+                        model=SearchIndexModel(definition=text_def, name=text_index, type="search")))
+                print(f"ensure_vector_index: created text '{text_index}'; builds in background")
+            except Exception as e:
+                print(f"ensure_vector_index: text index create failed (non-fatal): {e}")
+
+        # 2) Atlas vectorSearch index for semantic / cross-language.
+        index_name = os.getenv("MONGO_VECTOR_INDEX", "vector_index")
         if index_name in existing:
             print(f"ensure_vector_index: '{index_name}' already present")
             return
         sample = await loop.run_in_executor(
             None, lambda: coll.find_one({"embedding": {"$exists": True, "$ne": []}}, {"embedding": 1}))
         if not sample or not sample.get("embedding"):
-            print("ensure_vector_index: no embeddings yet; skipping")
+            print("ensure_vector_index: no embeddings yet; skipping vector index")
             return
         dims = len(sample["embedding"])
         definition = {"fields": [
@@ -1427,32 +1446,16 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
     if req.mode in ("exact", "smart"):
         # Direct DB queries for exact search to prevent OOM
         if provider == "mongodb":
-            try:
-                from shared.mongodb_client import get_mongodb_client
-                import re as _re
-                _, mongo_db = get_mongodb_client()
-                loop = asyncio.get_running_loop()
-                # Token-AND match: require every query word to appear (any order,
-                # punctuation-insensitive) so "Fleming left hand rule" still matches
-                # a page containing "Fleming's left hand rule".
-                tokens = [t for t in _re.split(r"\s+", req.query.strip()) if len(t) >= 2]
-                if tokens:
-                    query_filter = {"$and": [{"text": {"$regex": _re.escape(t), "$options": "i"}} for t in tokens]}
-                else:
-                    query_filter = {"text": {"$regex": _re.escape(req.query), "$options": "i"}}
-                if req.bookId:
-                    query_filter["bookId"] = req.bookId
+            from shared.mongodb_client import get_mongodb_client
+            import re as _re
+            _, mongo_db = get_mongodb_client()
+            loop = asyncio.get_running_loop()
 
-                docs = await loop.run_in_executor(
-                    None,
-                    lambda: list(mongo_db["book_pages"].find(
-                        query_filter,
-                        {"text": 1, "bookId": 1, "bookTitle": 1, "pageNumber": 1, "grade": 1, "subject": 1, "language": 1, "year": 1}
-                    ).limit(req.limit))
-                )
+            def _shape(docs):
+                out = []
                 for data in docs:
                     text = data.get("text", "")
-                    results.append({
+                    out.append({
                         "bookId": data.get("bookId"),
                         "bookTitle": data.get("bookTitle", "Unknown Book"),
                         "pageNumber": data.get("pageNumber"),
@@ -1461,10 +1464,50 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
                         "subject": data.get("subject", ""),
                         "language": data.get("language", "ar"),
                         "year": data.get("year", 2026),
-                        "score": 1.0
+                        "score": round(float(data.get("score", 1.0)), 4),
                     })
+                return out
+
+            atlas_ok = False
+            # Fast path: Atlas Search full-text index ($search) — sub-second, typo-
+            # tolerant (fuzzy). Replaces the unindexed $regex scan over 34k pages.
+            try:
+                compound: dict = {"must": [{"text": {"query": req.query, "path": "text",
+                                                      "fuzzy": {"maxEdits": 1, "prefixLength": 2}}}]}
+                if req.bookId:
+                    compound["filter"] = [{"equals": {"path": "bookId", "value": req.bookId}}]
+                pipeline = [
+                    {"$search": {"index": os.getenv("MONGO_TEXT_INDEX", "text_index"), "compound": compound}},
+                    {"$limit": req.limit},
+                    {"$project": {"_id": 0, "text": 1, "bookId": 1, "bookTitle": 1, "pageNumber": 1,
+                                  "grade": 1, "subject": 1, "language": 1, "year": 1,
+                                  "score": {"$meta": "searchScore"}}},
+                ]
+                docs = await loop.run_in_executor(None, lambda: list(mongo_db["book_pages"].aggregate(pipeline)))
+                results.extend(_shape(docs))
+                atlas_ok = True
             except Exception as e:
-                print(f"MongoDB exact search failed: {e}")
+                print(f"$search unavailable, falling back to regex scan: {e}")
+
+            # Fallback: token-AND regex (unindexed; slow) while the text index builds.
+            if not atlas_ok:
+                try:
+                    tokens = [t for t in _re.split(r"\s+", req.query.strip()) if len(t) >= 2]
+                    if tokens:
+                        query_filter: dict = {"$and": [{"text": {"$regex": _re.escape(t), "$options": "i"}} for t in tokens]}
+                    else:
+                        query_filter = {"text": {"$regex": _re.escape(req.query), "$options": "i"}}
+                    if req.bookId:
+                        query_filter["bookId"] = req.bookId
+                    docs = await loop.run_in_executor(
+                        None,
+                        lambda: list(mongo_db["book_pages"].find(
+                            query_filter,
+                            {"text": 1, "bookId": 1, "bookTitle": 1, "pageNumber": 1, "grade": 1, "subject": 1, "language": 1, "year": 1}
+                        ).limit(req.limit)))
+                    results.extend(_shape(docs))
+                except Exception as e:
+                    print(f"MongoDB exact regex search failed: {e}")
         else:
             # Firestore group stream fallback for exact search
             try:
