@@ -96,11 +96,10 @@ function UserFooter({ onPick }: { onPick?: () => void }) {
       : user?.photoURL || null);
   const initial = nameReady ? (displayName || (isAR ? 'ض' : 'G')).slice(0, 1) : '';
   const yearText = nameReady ? yearLabel(profile, isAR) : '';
-  const profileHref = user
-    ? `/${locale}/u/${(profile?.username || profile?.displayName || user.displayName || 'me')
-        .toLowerCase()
-        .replace(/\s+/g, '-')}`
-    : `/${locale}/sign-in`;
+  // Link to the user's OWN profile page (works for Google + anonymous and under
+  // mongodb). The public /u/[username] route does a Firestore username lookup
+  // that is empty in mongodb mode → 404, which is what guests were hitting.
+  const profileHref = user ? `/${locale}/profile` : `/${locale}/sign-in`;
 
   return (
     <div className="border-t border-slate-200 px-4 py-3 flex items-center gap-3">

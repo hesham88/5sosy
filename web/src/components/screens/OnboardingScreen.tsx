@@ -114,7 +114,7 @@ async function streamOnboarding(
 export default function OnboardingScreen() {
   const { isAR, t, locale } = useApp();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const { profile } = useProfile();
 
   const [messages, setMessages] = useState<ChatMsg[]>([]);
@@ -294,6 +294,15 @@ export default function OnboardingScreen() {
           <div className="text-[11px] text-slate-500 mt-1">{t.appSub}</div>
         </div>
         <div className="ms-auto flex items-center gap-3">
+          <button
+            onClick={async () => {
+              try { await signOut(); } catch {}
+              window.location.href = `/${locale}/sign-in`;
+            }}
+            className="text-[12px] font-semibold text-slate-500 hover:text-sky-700 transition"
+          >
+            {isAR ? '↩ تسجيل دخول مختلف' : '↩ Use a different sign-in'}
+          </button>
           <LanguageSwitcher variant="dropdown" />
           <span className="text-[12px] text-slate-500 ltr">
             {progress.done}/{progress.total}

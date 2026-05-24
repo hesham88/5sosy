@@ -12,7 +12,7 @@ const dict = {
   auth: {
     title: 'Bienvenue sur 5sosy',
     sub: 'Connectez-vous pour poursuivre votre plan et votre série d’étude.',
-    google: 'Continuer avec Google',
+    google: 'Commencer avec Google',
     anon: 'Continuer en invité',
     email: 'E-mail',
     password: 'Mot de passe',
