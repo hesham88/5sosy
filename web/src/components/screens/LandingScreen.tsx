@@ -260,8 +260,7 @@ export default function LandingScreen() {
       <div className="absolute bottom-[-10%] start-[20%] w-[400px] h-[400px] rounded-full bg-emerald-500/15 blur-[130px] animate-blob-slow pointer-events-none" />
       <div className="absolute bottom-[30%] end-[10%] w-[380px] h-[380px] rounded-full bg-orange-500/12 blur-[110px] animate-blob-slower pointer-events-none" />
 
-      {/* Grid Overlay */}
-      <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none" />
+
 
       {/* Locked/Fixed Top Glassmorphic Navigation */}
       <header className="fixed top-0 inset-x-0 z-50 px-4 py-3 transition-all duration-300">
