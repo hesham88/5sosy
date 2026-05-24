@@ -1340,7 +1340,7 @@ export default function BooksScreen() {
                       <div className="flex items-center justify-between mb-2">
                         <span className="font-extrabold text-[13.5px] text-slate-950 truncate max-w-[70%]">{(isAR ? res.bookTitleAr : res.bookTitleEn) || res.bookTitle}</span>
                         <span className="text-[11px] bg-sky-50 text-sky-700 font-bold px-2 py-0.5 rounded-lg">
-                          Score: {Math.round(res.score * 100)}%
+                          {isAR ? 'صلة' : 'Match'}: {Math.min(100, Math.round((res.score || 0) * 100))}%
                         </span>
                       </div>
                       

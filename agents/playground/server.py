@@ -1469,21 +1469,35 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
                 return out
 
             atlas_ok = False
-            # Fast path: Atlas Search full-text index ($search) — sub-second, typo-
-            # tolerant (fuzzy). Replaces the unindexed $regex scan over 34k pages.
+            # Fast path: Atlas Search full-text index ($search). Require EVERY query
+            # word (compound.must = AND) for precision + BM25 relevance ranking —
+            # this restores the accuracy of the old token-AND regex but indexed/fast.
+            # Fuzzy is ONLY a rescue when the precise pass finds nothing, so typos
+            # still work yet never pollute the ranking with loose matches.
             try:
-                compound: dict = {"must": [{"text": {"query": req.query, "path": "text",
-                                                      "fuzzy": {"maxEdits": 1, "prefixLength": 2}}}]}
-                if req.bookId:
-                    compound["filter"] = [{"equals": {"path": "bookId", "value": req.bookId}}]
-                pipeline = [
-                    {"$search": {"index": os.getenv("MONGO_TEXT_INDEX", "text_index"), "compound": compound}},
-                    {"$limit": req.limit},
-                    {"$project": {"_id": 0, "text": 1, "bookId": 1, "bookTitle": 1, "pageNumber": 1,
-                                  "grade": 1, "subject": 1, "language": 1, "year": 1,
-                                  "score": {"$meta": "searchScore"}}},
-                ]
-                docs = await loop.run_in_executor(None, lambda: list(mongo_db["book_pages"].aggregate(pipeline)))
+                words = [w for w in _re.split(r"\s+", req.query.strip()) if len(w) >= 2] or [req.query.strip()]
+
+                def _run(fuzzy: bool):
+                    must = [
+                        {"text": {"query": w, "path": "text",
+                                  **({"fuzzy": {"maxEdits": 1, "prefixLength": 3}} if fuzzy else {})}}
+                        for w in words
+                    ]
+                    comp: dict = {"must": must}
+                    if req.bookId:
+                        comp["filter"] = [{"equals": {"path": "bookId", "value": req.bookId}}]
+                    pipeline = [
+                        {"$search": {"index": os.getenv("MONGO_TEXT_INDEX", "text_index"), "compound": comp}},
+                        {"$limit": req.limit},
+                        {"$project": {"_id": 0, "text": 1, "bookId": 1, "bookTitle": 1, "pageNumber": 1,
+                                      "grade": 1, "subject": 1, "language": 1, "year": 1,
+                                      "score": {"$meta": "searchScore"}}},
+                    ]
+                    return list(mongo_db["book_pages"].aggregate(pipeline))
+
+                docs = await loop.run_in_executor(None, lambda: _run(False))
+                if not docs:
+                    docs = await loop.run_in_executor(None, lambda: _run(True))
                 results.extend(_shape(docs))
                 atlas_ok = True
             except Exception as e:

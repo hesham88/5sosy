@@ -287,7 +287,7 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
                   >
                     <div className="flex justify-between items-center text-[10.5px] text-slate-400 mb-1">
                       <span className="font-bold text-sky-600">{isAR ? `صفحة ${res.pageNumber}` : `Page ${res.pageNumber}`} ↗</span>
-                      <span>{Math.round((res.score || 0) * 100)}%</span>
+                      <span>{Math.min(100, Math.round((res.score || 0) * 100))}%</span>
                     </div>
                     <p className="text-[11.5px] text-slate-600 line-clamp-2 leading-relaxed">{res.text}</p>
                   </button>
