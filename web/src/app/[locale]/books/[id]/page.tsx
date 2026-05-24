@@ -218,7 +218,7 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
         {/* Left Sidebar: Navigation & Search */}
         <div className="w-full lg:w-[320px] shrink-0 flex flex-col gap-4 max-h-full overflow-hidden">
           <Btn kind="outline" size="sm" className="w-fit" onClick={() => router.push(`/${locale}/books`)}>
-            {isAR ? '➔ العودة للمكتبة' : '← Back to Library'}
+            {isAR ? '➔' : '←'} {t.books.backToLibrary}
           </Btn>
 
           <Card className="p-4 flex flex-col gap-3 shrink-0">
@@ -234,7 +234,7 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
           {/* Quick Page Picker list */}
           <Card className="flex-1 p-3 flex flex-col overflow-hidden min-h-[150px]">
             <div className="text-[12px] font-extrabold text-slate-700 uppercase tracking-wider mb-2">
-              {isAR ? 'فهرس الصفحات' : 'Page Navigation'}
+              {t.books.pageNavigation}
             </div>
             <div className="flex-1 overflow-y-auto grid grid-cols-4 gap-1.5 p-1 slim">
               {pages.map((p) => (

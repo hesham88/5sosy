@@ -688,13 +688,13 @@ export default function BooksScreen() {
               <div className="min-w-0">
                 <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-bold text-emerald-700 border border-emerald-100">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  {isAR ? 'متصل بقاعدة Firestore' : 'Live from Firestore'}
+                  {t.books.liveFirestore}
                 </div>
                 <h1 className="text-2xl lg:text-3xl font-extrabold text-slate-950 mt-3">{t.books.title}</h1>
                 <p className="text-slate-500 mt-1 text-[14px] max-w-3xl">{t.books.sub}</p>
               </div>
               <Btn kind="outline" size="sm" onClick={() => setShowSyncDashboard((prev) => !prev)}>
-                🔄 {isAR ? 'لوحة المزامنة' : 'Sync Console'}
+                🔄 {t.books.syncConsole}
               </Btn>
             </div>
 
@@ -801,7 +801,7 @@ export default function BooksScreen() {
                     }}
                     className="px-3.5 py-1.5 rounded-lg text-[12.5px] font-bold border border-rose-200 text-rose-600 hover:bg-rose-50 transition"
                   >
-                    {isAR ? 'إعادة ضبط' : 'Reset'}
+                    {t.books.reset}
                   </button>
                 )}
               </div>
@@ -951,13 +951,13 @@ export default function BooksScreen() {
           <aside className="hidden lg:block w-72 shrink-0 bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-6">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <h3 className="font-extrabold text-slate-900 text-[14px]">
-                {isAR ? 'تصفية المحتوى' : 'Filter Catalog'}
+                {t.books.filterCatalog}
               </h3>
               <button
                 onClick={clearAllFilters}
                 className="text-[11.5px] font-bold text-slate-400 hover:text-sky-600 transition"
               >
-                {isAR ? 'إعادة ضبط' : 'Reset'}
+                {t.books.reset}
               </button>
             </div>
             
@@ -1000,7 +1000,7 @@ export default function BooksScreen() {
                   onClick={() => setShowMobileFilters(true)}
                   className="lg:hidden bg-white border border-slate-200 text-slate-700 font-bold text-[12.5px] px-3.5 py-2.5 rounded-xl shadow-sm hover:border-slate-300 transition flex items-center gap-1.5"
                 >
-                  <span>⚙️</span> {isAR ? 'تصفية' : 'Filters'}
+                  <span>⚙️</span> {t.books.filtersBtn}
                   {(subjectFilter !== 'all' || gradeFilter !== 'all' || stageFilter !== 'all' || typeFilter !== 'all' || catalogQuery) && (
                     <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
                   )}
@@ -1011,25 +1011,25 @@ export default function BooksScreen() {
                   <CatalogTab
                     active={activeTab === 'official'}
                     onClick={() => { setActiveTab('official'); setGradeFilter('all'); }}
-                    label={isAR ? 'كتب الوزارة' : 'Ministry Books'}
+                    label={t.books.ministryBooks}
                     count={officialBooks.length}
                   />
                   <CatalogTab
                     active={activeTab === 'added'}
                     onClick={() => { setActiveTab('added'); setGradeFilter('all'); }}
-                    label={isAR ? 'تحميلات الطلاب' : 'User Uploads'}
+                    label={t.books.userUploads}
                     count={addedBooks.length}
                   />
                   <CatalogTab
                     active={activeTab === 'videos'}
                     onClick={() => { setActiveTab('videos'); setGradeFilter('all'); }}
-                    label={isAR ? 'الشروحات والملخصات' : 'Videos'}
+                    label={t.books.videosTab}
                     count={dbVideos.length}
                   />
                   <CatalogTab
                     active={activeTab === 'insights'}
                     onClick={() => { setActiveTab('insights'); setGradeFilter('all'); }}
-                    label={isAR ? 'الإحصائيات والتحليلات' : 'Insights & Visualizer'}
+                    label={t.books.insightsTab}
                     count={undefined}
                   />
                 </div>
@@ -1038,7 +1038,7 @@ export default function BooksScreen() {
               {/* Status and count */}
               <div className="flex items-center gap-2 text-[12px] justify-end">
                 <span className="text-slate-500">
-                  {activeTab === 'videos' ? filteredVideos.length : filtered.length} {isAR ? 'نتيجة' : 'results'}
+                  {activeTab === 'videos' ? filteredVideos.length : filtered.length} {t.books.resultsLabel}
                 </span>
                 {activeTab !== 'videos' && (
                   <>
@@ -1248,13 +1248,13 @@ export default function BooksScreen() {
             <div className="space-y-6">
               <div className="flex items-center justify-between pb-3 border-b border-slate-200">
                 <h3 className="font-extrabold text-slate-900 text-[15px]">
-                  {isAR ? 'تصفية المحتوى' : 'Filter Catalog'}
+                  {t.books.filterCatalog}
                 </h3>
                 <button
                   onClick={() => { clearAllFilters(); setShowMobileFilters(false); }}
                   className="text-[11.5px] font-bold text-slate-400 hover:text-sky-600 transition"
                 >
-                  {isAR ? 'إعادة ضبط' : 'Reset'}
+                  {t.books.reset}
                 </button>
               </div>
               
@@ -1503,7 +1503,7 @@ function FilterContent({
       {/* 1. Free-text search input */}
       <div>
         <label className="block text-[11.5px] font-bold text-slate-400 uppercase mb-2">
-          {isAR ? 'بحث في العناوين:' : 'Search Text:'}
+          {t.books.searchTextLabel}
         </label>
         <div className="flex items-center gap-2 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 focus-within:border-slate-400 focus-within:bg-white transition">
           <span className="text-slate-400">⌕</span>
@@ -1511,7 +1511,7 @@ function FilterContent({
             type="text"
             value={catalogQuery}
             onChange={(e) => setCatalogQuery(e.target.value)}
-            placeholder={isAR ? 'ابحث هنا...' : 'Find...'}
+            placeholder={t.books.findPlaceholder}
             className="flex-1 bg-transparent border-none text-[13px] text-slate-800 focus:outline-none min-w-0"
           />
         </div>
@@ -1520,14 +1520,14 @@ function FilterContent({
       {/* 2. Stage Filter */}
       <div>
         <label className="block text-[11.5px] font-bold text-slate-400 uppercase mb-2">
-          {isAR ? 'المرحلة الدراسية:' : 'Education Stage:'}
+          {t.books.educationStage}
         </label>
         <div className="flex flex-col gap-1.5">
           {[
-            { id: 'all', ar: 'كل المراحل', en: 'All Stages' },
-            { id: 'primary', ar: 'الابتدائي', en: 'Primary' },
-            { id: 'preparatory', ar: 'الإعدادي', en: 'Preparatory' },
-            { id: 'secondary', ar: 'الثانوي', en: 'Secondary' }
+            { id: 'all', label: t.books.allStages },
+            { id: 'primary', label: t.books.stagePrimary },
+            { id: 'preparatory', label: t.books.stagePrep },
+            { id: 'secondary', label: t.books.stageSecondary }
           ].map((st) => (
             <button
               key={st.id}
@@ -1537,7 +1537,7 @@ function FilterContent({
                   ? 'bg-slate-900 text-white border-slate-900 font-extrabold shadow-sm'
                   : 'bg-white text-slate-650 border-slate-200 hover:border-slate-350 hover:bg-slate-50'}`}
             >
-              {isAR ? st.ar : st.en}
+              {st.label}
             </button>
           ))}
         </div>
@@ -1547,14 +1547,14 @@ function FilterContent({
       {availableGrades.length > 0 && (
         <div>
           <label className="block text-[11.5px] font-bold text-slate-400 uppercase mb-2">
-            {isAR ? 'الصف الدراسي:' : 'Grade:'}
+            {t.books.gradeLabel}
           </label>
           <select
             value={gradeFilter}
             onChange={(e) => setGradeFilter(e.target.value)}
             className="w-full text-[13px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-850 focus:outline-none focus:border-sky-500 focus:bg-white transition"
           >
-            <option value="all">{isAR ? 'كل الصفوف' : 'All Grades'}</option>
+            <option value="all">{t.books.allGrades}</option>
             {availableGrades.map((g) => (
               <option key={g} value={g}>{g}</option>
             ))}
@@ -1566,14 +1566,14 @@ function FilterContent({
       {activeTab !== 'videos' && availableTypes.length > 0 && (
         <div>
           <label className="block text-[11.5px] font-bold text-slate-400 uppercase mb-2">
-            {isAR ? 'نوع الكتاب:' : 'Book Type:'}
+            {t.books.bookTypeLabel}
           </label>
           <select
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value)}
             className="w-full text-[13px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-850 focus:outline-none focus:border-sky-500 focus:bg-white transition"
           >
-            <option value="all">{isAR ? 'كل الأنواع' : 'All Types'}</option>
+            <option value="all">{t.books.allTypes}</option>
             {availableTypes.map((t) => (
               <option key={t} value={t}>{t}</option>
             ))}
@@ -1585,14 +1585,14 @@ function FilterContent({
       {availableLanguages.length > 0 && (
         <div>
           <label className="block text-[11.5px] font-bold text-slate-400 uppercase mb-2">
-            {isAR ? 'اللغة:' : 'Language:'}
+            {t.books.languageLabel}
           </label>
           <select
             value={languageFilter}
             onChange={(e) => setLanguageFilter(e.target.value)}
             className="w-full text-[13px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-850 focus:outline-none focus:border-sky-500 focus:bg-white transition"
           >
-            <option value="all">{isAR ? 'كل اللغات' : 'All Languages'}</option>
+            <option value="all">{t.books.allLanguages}</option>
             {availableLanguages.map((l) => (
               <option key={l} value={l}>{l === 'ar' ? (isAR ? 'عربي' : 'Arabic') : l === 'en' ? (isAR ? 'إنجليزي' : 'English') : l.toUpperCase()}</option>
             ))}
@@ -1604,14 +1604,14 @@ function FilterContent({
       {availableYears.length > 0 && (
         <div>
           <label className="block text-[11.5px] font-bold text-slate-400 uppercase mb-2">
-            {isAR ? 'سنة النشر:' : 'Year:'}
+            {t.books.yearLabel}
           </label>
           <select
             value={yearFilter}
             onChange={(e) => setYearFilter(e.target.value)}
             className="w-full text-[13px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-850 focus:outline-none focus:border-sky-500 focus:bg-white transition"
           >
-            <option value="all">{isAR ? 'كل السنوات' : 'All Years'}</option>
+            <option value="all">{t.books.allYears}</option>
             {availableYears.map((y) => (
               <option key={y} value={y}>{y}</option>
             ))}
@@ -1623,14 +1623,14 @@ function FilterContent({
       {availablePublishers.length > 0 && (
         <div>
           <label className="block text-[11.5px] font-bold text-slate-400 uppercase mb-2">
-            {isAR ? 'الناشر:' : 'Publisher:'}
+            {t.books.publisherLabel}
           </label>
           <select
             value={publisherFilter}
             onChange={(e) => setPublisherFilter(e.target.value)}
             className="w-full text-[13px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-850 focus:outline-none focus:border-sky-500 focus:bg-white transition"
           >
-            <option value="all">{isAR ? 'كل الناشرين' : 'All Publishers'}</option>
+            <option value="all">{t.books.allPublishers}</option>
             {availablePublishers.map((p) => (
               <option key={p} value={p}>{p}</option>
             ))}
@@ -1641,7 +1641,7 @@ function FilterContent({
       {/* 5. Subject Filter */}
       <div>
         <label className="block text-[11.5px] font-bold text-slate-400 uppercase mb-2">
-          {isAR ? 'المواد الدراسية:' : 'Subjects:'}
+          {t.books.subjectsLabel}
         </label>
         <div className="space-y-1">
           <button
@@ -1651,7 +1651,7 @@ function FilterContent({
                 ? 'bg-slate-100 text-slate-900 font-extrabold shadow-sm'
                 : 'text-slate-600 hover:bg-slate-50'}`}
           >
-            📚 {isAR ? 'كل المواد' : 'All Subjects'}
+            📚 {t.books.allSubjects}
           </button>
           {Object.keys(SUBJECT_META).map((s) => {
             const meta = SUBJECT_META[s as SubjectId];
