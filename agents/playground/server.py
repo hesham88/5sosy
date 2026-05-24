@@ -64,10 +64,48 @@ ALLOWED_ORIGINS = [
     if o.strip()
 ]
 
+async def _ensure_vector_index():
+    """Idempotently ensure the Atlas vectorSearch index on book_pages.embedding.
+    Runs on startup so semantic search / RAG retrieval are fast cross-language —
+    no manual Atlas setup needed. No-op if it already exists or embeddings absent."""
+    if os.getenv("DATABASE_PROVIDER", "firestore").lower() != "mongodb":
+        return
+    try:
+        from pymongo.operations import SearchIndexModel
+        from shared.mongodb_client import get_mongodb_client
+        loop = asyncio.get_running_loop()
+        _, mdb = get_mongodb_client()
+        coll = mdb["book_pages"]
+        index_name = os.getenv("MONGO_VECTOR_INDEX", "vector_index")
+        existing = await loop.run_in_executor(None, lambda: [ix.get("name") for ix in coll.list_search_indexes()])
+        if index_name in existing:
+            print(f"ensure_vector_index: '{index_name}' already present")
+            return
+        sample = await loop.run_in_executor(
+            None, lambda: coll.find_one({"embedding": {"$exists": True, "$ne": []}}, {"embedding": 1}))
+        if not sample or not sample.get("embedding"):
+            print("ensure_vector_index: no embeddings yet; skipping")
+            return
+        dims = len(sample["embedding"])
+        definition = {"fields": [
+            {"type": "vector", "path": "embedding", "numDimensions": dims, "similarity": "cosine"},
+            {"type": "filter", "path": "bookId"},
+            {"type": "filter", "path": "subject"},
+            {"type": "filter", "path": "grade"},
+        ]}
+        model = SearchIndexModel(definition=definition, name=index_name, type="vectorSearch")
+        await loop.run_in_executor(None, lambda: coll.create_search_index(model=model))
+        print(f"ensure_vector_index: created '{index_name}' (dims={dims}); builds in background")
+    except Exception as e:
+        print(f"ensure_vector_index failed (non-fatal): {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Load pages cache asynchronously on startup
     asyncio.create_task(load_pages_cache())
+    # Ensure the Atlas vector index exists (idempotent) so semantic search is fast.
+    asyncio.create_task(_ensure_vector_index())
 
     async def check_and_start_monitor():
         try:
@@ -1391,10 +1429,17 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
         if provider == "mongodb":
             try:
                 from shared.mongodb_client import get_mongodb_client
+                import re as _re
                 _, mongo_db = get_mongodb_client()
                 loop = asyncio.get_running_loop()
-                # Run case-insensitive regex search directly in MongoDB, with optional bookId filter
-                query_filter = {"text": {"$regex": req.query, "$options": "i"}}
+                # Token-AND match: require every query word to appear (any order,
+                # punctuation-insensitive) so "Fleming left hand rule" still matches
+                # a page containing "Fleming's left hand rule".
+                tokens = [t for t in _re.split(r"\s+", req.query.strip()) if len(t) >= 2]
+                if tokens:
+                    query_filter = {"$and": [{"text": {"$regex": _re.escape(t), "$options": "i"}} for t in tokens]}
+                else:
+                    query_filter = {"text": {"$regex": _re.escape(req.query), "$options": "i"}}
                 if req.bookId:
                     query_filter["bookId"] = req.bookId
 

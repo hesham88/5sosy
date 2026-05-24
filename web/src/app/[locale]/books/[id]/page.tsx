@@ -32,7 +32,6 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
-  const [searchMode, setSearchMode] = useState<'semantic' | 'exact'>('semantic');
 
   useEffect(() => {
     const provider = (process.env.NEXT_PUBLIC_DATABASE_PROVIDER || 'firestore').toLowerCase();
@@ -232,81 +231,6 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
             </div>
           </Card>
 
-          {/* Local Vector Search inside Book */}
-          <Card className="p-4 flex flex-col gap-2 shrink-0">
-            <div className="text-[12px] font-extrabold text-slate-700 uppercase tracking-wider">
-              {isAR ? 'ابحث داخل الكتاب' : 'Search Inside Book'}
-            </div>
-            <div className="relative flex items-center border border-slate-200 rounded-xl p-1 bg-slate-50 focus-within:border-sky-500 transition">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleLocalSearch()}
-                placeholder={
-                  searchMode === 'exact'
-                    ? (isAR ? 'ابحث عن كلمات مطابقة...' : 'Search for words...')
-                    : (isAR ? 'ابحث عن مفهوم...' : 'Search for a concept...')
-                }
-                className="flex-1 bg-transparent border-none text-[12px] focus:outline-none p-1.5 min-w-0"
-              />
-              <button
-                onClick={handleLocalSearch}
-                className="bg-sky-600 hover:bg-sky-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg whitespace-nowrap"
-              >
-                {isAR ? 'بحث' : 'Find'}
-              </button>
-            </div>
-
-            {/* Search Mode Toggle */}
-            <div className="flex gap-4 text-[10.5px] font-semibold text-slate-550 mt-1">
-              <label className="flex items-center gap-1 cursor-pointer select-none">
-                <input
-                  type="radio"
-                  name="localSearchMode"
-                  value="semantic"
-                  checked={searchMode === 'semantic'}
-                  onChange={() => setSearchMode('semantic')}
-                  className="w-3.5 h-3.5 text-sky-600 focus:ring-sky-500 border-slate-350"
-                />
-                <span>🧠 {isAR ? 'دلالي' : 'Semantic'}</span>
-              </label>
-              <label className="flex items-center gap-1 cursor-pointer select-none">
-                <input
-                  type="radio"
-                  name="localSearchMode"
-                  value="exact"
-                  checked={searchMode === 'exact'}
-                  onChange={() => setSearchMode('exact')}
-                  className="w-3.5 h-3.5 text-sky-600 focus:ring-sky-500 border-slate-350"
-                />
-                <span>📝 {isAR ? 'دقيق' : 'Exact'}</span>
-              </label>
-            </div>
-
-            {searchLoading ? (
-              <div className="text-center py-4"><div className="w-5 h-5 border-2 border-sky-600 border-t-transparent rounded-full animate-spin mx-auto"></div></div>
-            ) : searchResults.length > 0 ? (
-              <div className="max-h-[150px] overflow-y-auto space-y-2 slim mt-2">
-                {searchResults.map((res: any, idx: number) => (
-                  <div
-                    key={idx}
-                    onClick={() => setCurrentPageNum(res.pageNumber)}
-                    className="p-2 border border-slate-100 rounded-lg hover:bg-sky-50 transition cursor-pointer text-start"
-                  >
-                    <div className="flex justify-between items-center text-[10px] text-slate-400 mb-1">
-                      <span className="font-bold text-sky-600">{isAR ? `صفحة ${res.pageNumber}` : `Page ${res.pageNumber}`}</span>
-                      <span>Score: {Math.round(res.score * 100)}%</span>
-                    </div>
-                    <p className="text-[11px] text-slate-600 line-clamp-2 leading-relaxed">{res.text}</p>
-                  </div>
-                ))}
-              </div>
-            ) : searchQuery.trim() !== '' && (
-              <div className="text-[11px] text-slate-400 italic text-center py-2">{isAR ? 'لا توجد نتائج' : 'No results found.'}</div>
-            )}
-          </Card>
-
           {/* Quick Page Picker list */}
           <Card className="flex-1 p-3 flex flex-col overflow-hidden min-h-[150px]">
             <div className="text-[12px] font-extrabold text-slate-700 uppercase tracking-wider mb-2">
@@ -332,6 +256,47 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
 
         {/* Central Reading Area */}
         <div className="flex-1 flex flex-col bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm h-full">
+          {/* Smart search bar — above the page, unified (exact-first → semantic) */}
+          <div className="px-4 lg:px-6 pt-4 pb-3 border-b border-slate-100 bg-white shrink-0 relative">
+            <div className="relative flex items-center border border-slate-200 rounded-xl p-1 bg-slate-50 focus-within:border-sky-500 focus-within:ring-2 focus-within:ring-sky-200/60 transition">
+              <span className="px-2 text-slate-400">🔍</span>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleLocalSearch()}
+                placeholder={isAR ? 'ابحث داخل الكتاب — كلمة أو سؤال…' : 'Search inside this book — a word or a question…'}
+                className="flex-1 bg-transparent border-none text-[13px] focus:outline-none p-1.5 min-w-0"
+              />
+              <button
+                onClick={handleLocalSearch}
+                className="bg-sky-600 hover:bg-sky-700 text-white text-[12px] font-bold px-4 py-1.5 rounded-lg whitespace-nowrap"
+              >
+                {isAR ? 'بحث ذكي' : 'Smart Search'}
+              </button>
+            </div>
+            {searchLoading ? (
+              <div className="text-center py-3"><div className="w-5 h-5 border-2 border-sky-600 border-t-transparent rounded-full animate-spin mx-auto" /></div>
+            ) : searchResults.length > 0 ? (
+              <div className="absolute z-20 left-4 right-4 lg:left-6 lg:right-6 mt-2 max-h-[280px] overflow-y-auto space-y-2 slim bg-white border border-slate-200 rounded-xl shadow-lg p-2">
+                {searchResults.map((res: any, idx: number) => (
+                  <button
+                    key={idx}
+                    onClick={() => { setCurrentPageNum(res.pageNumber); setSearchResults([]); }}
+                    className="w-full p-2.5 border border-slate-100 rounded-lg hover:bg-sky-50 transition cursor-pointer text-start"
+                  >
+                    <div className="flex justify-between items-center text-[10.5px] text-slate-400 mb-1">
+                      <span className="font-bold text-sky-600">{isAR ? `صفحة ${res.pageNumber}` : `Page ${res.pageNumber}`} ↗</span>
+                      <span>{Math.round((res.score || 0) * 100)}%</span>
+                    </div>
+                    <p className="text-[11.5px] text-slate-600 line-clamp-2 leading-relaxed">{res.text}</p>
+                  </button>
+                ))}
+              </div>
+            ) : searchQuery.trim() !== '' && (
+              <div className="text-[11px] text-slate-400 italic text-center py-2">{isAR ? 'لا توجد نتائج مطابقة.' : 'No matching pages.'}</div>
+            )}
+          </div>
           {/* Header */}
           <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center shrink-0">
             <div className="flex items-center gap-2">
