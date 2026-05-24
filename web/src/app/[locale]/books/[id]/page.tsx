@@ -18,7 +18,9 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
   const router = useRouter();
 
   const [book, setBook] = useState<Book | null>(null);
-  const [pages, setPages] = useState<any[]>([]);
+  const [pages, setPages] = useState<any[]>([]);            // sparse: only loaded pages
+  const [pageCount, setPageCount] = useState(0);
+  const [pageLoading, setPageLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [currentPageNum, setCurrentPageNum] = useState<number>(1);
 
@@ -49,6 +51,7 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
           if (active) {
             setBook(data.book);
             setPages(data.pages || []);
+            setPageCount(data.pageCount || (data.pages || []).length);
           }
         })
         .catch((err) => {
@@ -112,6 +115,7 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
 
         loaded.sort((a, b) => (a.pageNumber || 0) - (b.pageNumber || 0));
         setPages(loaded);
+        setPageCount(loaded.length);
       } catch (e) {
         console.error('Failed to load book pages:', e);
       } finally {
@@ -123,8 +127,30 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
   }, [id]);
 
   const currentPage = useMemo(() => {
-    return pages.find(p => p.pageNumber === currentPageNum) || pages[0] || null;
+    return pages.find(p => p.pageNumber === currentPageNum) || null;
   }, [pages, currentPageNum]);
+
+  // Lazy-load the requested page on demand (mongodb) so opening a book is instant
+  // instead of transferring every page's OCR up front.
+  useEffect(() => {
+    const provider = (process.env.NEXT_PUBLIC_DATABASE_PROVIDER || 'firestore').toLowerCase();
+    if (provider !== 'mongodb' || !book) return;
+    if (pages.some(p => p.pageNumber === currentPageNum)) return;
+    let active = true;
+    setPageLoading(true);
+    fetch(`/api/books/${id}?page=${currentPageNum}`)
+      .then(r => r.json())
+      .then(d => {
+        if (active && d?.page) {
+          setPages(prev => prev.some(p => p.pageNumber === d.page.pageNumber) ? prev : [...prev, d.page]);
+        }
+      })
+      .catch((e) => console.error('page fetch failed', e))
+      .finally(() => { if (active) setPageLoading(false); });
+    return () => { active = false; };
+    // `pages` intentionally omitted — we gate on the membership check above to avoid a refetch loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPageNum, book, id]);
 
   // Handle local searching in book
   const handleLocalSearch = async () => {
@@ -237,17 +263,17 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
               {t.books.pageNavigation}
             </div>
             <div className="flex-1 overflow-y-auto grid grid-cols-4 gap-1.5 p-1 slim">
-              {pages.map((p) => (
+              {Array.from({ length: pageCount }, (_, i) => i + 1).map((n) => (
                 <button
-                  key={p.pageNumber}
-                  onClick={() => setCurrentPageNum(p.pageNumber)}
+                  key={n}
+                  onClick={() => setCurrentPageNum(n)}
                   className={`py-1.5 rounded-lg font-bold text-[12px] transition ${
-                    currentPageNum === p.pageNumber
+                    currentPageNum === n
                       ? 'bg-sky-600 text-white shadow-sm'
                       : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
                   }`}
                 >
-                  {p.pageNumber}
+                  {n}
                 </button>
               ))}
             </div>
@@ -302,7 +328,7 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
             <div className="flex items-center gap-2">
               <span className="text-xl">{subjectMeta.glyph}</span>
               <span className="font-extrabold text-[15px] text-slate-900">
-                {isAR ? `صفحة ${currentPageNum} من ${pages.length}` : `Page ${currentPageNum} of ${pages.length}`}
+                {isAR ? `صفحة ${currentPageNum} من ${pageCount}` : `Page ${currentPageNum} of ${pageCount}`}
               </span>
             </div>
 
@@ -315,8 +341,8 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
                 {isAR ? '➔' : '←'}
               </button>
               <button
-                disabled={currentPageNum >= pages.length}
-                onClick={() => setCurrentPageNum(prev => Math.min(pages.length, prev + 1))}
+                disabled={currentPageNum >= pageCount}
+                onClick={() => setCurrentPageNum(prev => Math.min(pageCount, prev + 1))}
                 className="w-9 h-9 rounded-full bg-white border border-slate-200 text-slate-700 hover:border-sky-500 disabled:opacity-50 transition grid place-items-center font-bold"
               >
                 {isAR ? '←' : '→'}
@@ -326,7 +352,11 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
 
           {/* Reading Content */}
           <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6 slim">
-            {currentPage ? (
+            {!currentPage && pageLoading ? (
+              <div className="grid place-items-center py-24">
+                <div className="w-8 h-8 border-2 border-sky-600 border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : currentPage ? (
               // Reading pane follows the BOOK's language (axis 2), not the
               // user's UI locale (axis 1). A French user reading an Arabic
               // physics book sees this pane render RTL with the Arabic font;
