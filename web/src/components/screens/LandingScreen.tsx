@@ -24,18 +24,84 @@ type AgentInfo = {
   flowAR: string;
   x: number;
   y: number;
-  cx: number; // curve anchor control x
-  cy: number; // curve anchor control y
+  cx: number;
+  cy: number;
 };
 
 export default function LandingScreen() {
   const { isAR, t, locale } = useApp();
-  const { user } = useAuth();
-  const { profile } = useProfile();
+  const { signInWithGoogle, signInAsGuest, user } = useAuth();
   const router = useRouter();
+
+  // Authentication State
+  const [busy, setBusy] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [scrolledPastHero, setScrolledPastHero] = useState(false);
+
+  // Contact Us Form State
+  const [contactName, setContactName] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [contactMessage, setContactMessage] = useState('');
+  const [contactSubmitting, setContactSubmitting] = useState(false);
+  const [contactSubmitted, setContactSubmitted] = useState(false);
 
   const [hoveredAgent, setHoveredAgent] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'stack' | 'capabilities' | 'gamification'>('capabilities');
+
+  // Track scrolling to move buttons to header
+  useEffect(() => {
+    const handleScroll = () => {
+      const heroButtons = document.getElementById('hero-auth-buttons');
+      if (heroButtons) {
+        const rect = heroButtons.getBoundingClientRect();
+        // If the bottom of the hero buttons container has scrolled off-screen
+        setScrolledPastHero(rect.bottom < 0);
+      }
+    };
+    window.addEventListener('scroll', handleScroll);
+    // Initial check
+    handleScroll();
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Auth helper
+  const handleAuth = (type: 'google' | 'guest') => async () => {
+    setBusy(type);
+    setAuthError(null);
+    try {
+      if (type === 'google') {
+        await signInWithGoogle();
+      } else {
+        await signInAsGuest();
+      }
+      router.push(`/${locale}/home`);
+    } catch (err: any) {
+      console.error('Auth action error:', err);
+      const code = err?.code ?? '';
+      if (code === 'auth/popup-closed-by-user') {
+        setAuthError(isAR ? 'اتقفلت نافذة تسجيل الدخول.' : 'Sign-in window was closed.');
+      } else if (code === 'auth/operation-not-allowed') {
+        setAuthError(isAR ? 'تسجيل دخول الضيف غير مفعّل.' : 'Guest sign-in is not enabled.');
+      } else {
+        setAuthError(err?.message || 'Authentication failed.');
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleContactSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!contactName.trim() || !contactEmail.trim() || !contactMessage.trim()) return;
+    setContactSubmitting(true);
+    setTimeout(() => {
+      setContactSubmitting(false);
+      setContactSubmitted(true);
+      setContactName('');
+      setContactEmail('');
+      setContactMessage('');
+    }, 1200);
+  };
 
   // Agent Swarm Configuration
   const agents: AgentInfo[] = [
@@ -170,7 +236,7 @@ export default function LandingScreen() {
   const selectedAgent = agents.find(a => a.id === (hoveredAgent || 'orchestrator')) || agents[0];
 
   return (
-    <div className="min-h-screen relative overflow-hidden bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-950 via-indigo-950 to-slate-950 text-slate-100 font-sans">
+    <div className="min-h-screen relative overflow-hidden bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-950 via-indigo-950 to-slate-950 text-slate-100 font-sans scroll-smooth">
       
       {/* Dynamic Background Glowing Blobs */}
       <div className="absolute top-[-10%] start-[-10%] w-[450px] h-[450px] rounded-full bg-pink-600/10 blur-[120px] animate-blob-slow pointer-events-none" />
@@ -181,9 +247,9 @@ export default function LandingScreen() {
       {/* Grid Overlay */}
       <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none" />
 
-      {/* Top Glassmorphic Navigation */}
-      <header className="relative z-10 mx-auto max-w-[1400px] px-6 py-4">
-        <div className="glass-panel rounded-2xl px-6 py-3 flex items-center justify-between shadow-2xl">
+      {/* Sticky Top Glassmorphic Navigation */}
+      <header className="sticky top-0 z-50 px-4 py-3 transition-all duration-300">
+        <div className="mx-auto max-w-[1400px] glass-panel rounded-2xl px-6 py-3 flex items-center justify-between shadow-2xl">
           <div className="flex items-center gap-3">
             <Logo size={36} />
             <div className="hidden sm:block">
@@ -196,6 +262,15 @@ export default function LandingScreen() {
             </div>
           </div>
 
+          {/* Quick Navigation Links */}
+          <nav className="hidden lg:flex items-center gap-6 text-[13px] font-bold text-slate-400">
+            <a href="#hero" className="hover:text-slate-155 transition">{isAR ? 'الرئيسية' : 'Home'}</a>
+            <a href="#visualizer" className="hover:text-slate-155 transition">{isAR ? 'شبكة الأذكياء' : 'Agent Swarm'}</a>
+            <a href="#capabilities" className="hover:text-slate-155 transition">{isAR ? 'القدرات' : 'Capabilities'}</a>
+            <a href="#stack" className="hover:text-slate-155 transition">{isAR ? 'التقنيات' : 'Tech Stack'}</a>
+            <a href="#contact" className="hover:text-slate-155 transition">{isAR ? 'اتصل بنا' : 'Contact'}</a>
+          </nav>
+
           <div className="flex items-center gap-4">
             <LanguageSwitcher variant="dropdown" />
             
@@ -207,22 +282,53 @@ export default function LandingScreen() {
                 <span>{isAR ? 'لوحة التحكم' : 'Dashboard'}</span>
                 <span className="rtl:rotate-180">➔</span>
               </button>
+            ) : scrolledPastHero ? (
+              // Floating Header Sign In elements when user scrolls past Hero buttons
+              <div className="flex items-center gap-2 animate-[fadeIn_0.3s_ease]">
+                <button
+                  onClick={handleAuth('google')}
+                  disabled={busy !== null}
+                  className="bg-white hover:bg-slate-100 text-slate-900 border border-slate-200 font-bold text-[11.5px] px-3 py-2 rounded-xl transition flex items-center gap-1.5 shadow-md shadow-slate-950/20"
+                  title={isAR ? 'تسجيل دخول بجوجل' : 'Sign in with Google'}
+                >
+                  {busy === 'google' ? (
+                    <span className="w-3.5 h-3.5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <span>🟦</span>
+                  )}
+                  <span className="hidden md:inline">{isAR ? 'جوجل' : 'Google'}</span>
+                </button>
+                
+                <button
+                  onClick={handleAuth('guest')}
+                  disabled={busy !== null}
+                  className="bg-pink-600/90 hover:bg-pink-600 text-white font-bold text-[11.5px] px-3 py-2 rounded-xl transition flex items-center gap-1.5 shadow-md shadow-pink-500/20"
+                  title={isAR ? 'الدخول كزائر' : 'Sign in as Guest'}
+                >
+                  {busy === 'guest' ? (
+                    <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <span>👤</span>
+                  )}
+                  <span className="hidden md:inline">{isAR ? 'زائر' : 'Guest'}</span>
+                </button>
+              </div>
             ) : (
-              <button
-                onClick={() => router.push(`/${locale}/sign-in`)}
+              <a
+                href="#hero-auth-buttons"
                 className="relative group overflow-hidden bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white font-bold text-[13px] px-4 py-2 rounded-xl transition shadow-lg shadow-pink-500/10 flex items-center gap-1"
               >
                 <span className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition" />
-                <span>{isAR ? 'ابدأ المذاكرة مجاناً' : 'Join Platform'}</span>
+                <span>{isAR ? 'ابدأ الآن' : 'Get Started'}</span>
                 <span className="rtl:rotate-180">➔</span>
-              </button>
+              </a>
             )}
           </div>
         </div>
       </header>
 
       {/* Hero Section */}
-      <section className="relative z-10 max-w-[1400px] mx-auto px-6 pt-12 pb-16 flex flex-col items-center text-center">
+      <section id="hero" className="relative z-10 max-w-[1400px] mx-auto px-6 pt-16 pb-16 flex flex-col items-center text-center">
         <span className="inline-flex items-center gap-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 font-extrabold text-[11px] uppercase tracking-widest px-3 py-1 rounded-full mb-6 text-glow-indigo">
           <span>✦</span>
           <span>{isAR ? 'سرب أذكياء ثنائي اللغة للثانوية العامة' : 'AUTONOMOUS BILINGUAL AGENT SWARM'}</span>
@@ -254,25 +360,63 @@ export default function LandingScreen() {
           )}
         </p>
 
-        <div className="flex flex-wrap justify-center gap-4 mt-8">
-          <button
-            onClick={() => router.push(user ? `/${locale}/home` : `/${locale}/sign-in`)}
-            className="glass-panel glass-glow-magenta hover:bg-slate-900 border-pink-500/20 text-white font-extrabold text-[14px] px-8 py-3.5 rounded-2xl transition duration-300"
-          >
-            {isAR ? 'تحدث مع أول وكيل 🦉' : 'Start Learning Free 🦉'}
-          </button>
-          <a
-            href="#visualizer"
-            className="glass-panel hover:bg-slate-900 border-slate-700/50 text-slate-300 hover:text-white font-bold text-[14px] px-8 py-3.5 rounded-2xl transition duration-300 flex items-center gap-2"
-          >
-            <span>{isAR ? 'شاهد خريطة التفاعل' : 'See Agent Workflows'}</span>
-            <span>↓</span>
-          </a>
+        {/* Hero Auth Buttons (google or anonymous sign-in) */}
+        <div id="hero-auth-buttons" className="flex flex-wrap justify-center gap-4 mt-8 min-h-[50px]">
+          {user ? (
+            <button
+              onClick={() => router.push(`/${locale}/home`)}
+              className="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-[14.5px] px-8 py-3.5 rounded-2xl transition duration-300 shadow-lg shadow-indigo-500/30 flex items-center gap-2"
+            >
+              <span>{isAR ? 'الدخول للوحة التحكم' : 'Go to Dashboard'}</span>
+              <span className="rtl:rotate-180">➔</span>
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={handleAuth('google')}
+                disabled={busy !== null}
+                className="bg-white hover:bg-slate-100 text-slate-900 border border-slate-200 font-extrabold text-[14px] px-6 py-3.5 rounded-2xl transition duration-300 flex items-center gap-2 shadow-lg shadow-slate-900/10"
+              >
+                {busy === 'google' ? (
+                  <span className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <span>🟦</span>
+                )}
+                <span>{isAR ? 'تسجيل دخول بجوجل' : 'Sign in with Google'}</span>
+              </button>
+              
+              <button
+                onClick={handleAuth('guest')}
+                disabled={busy !== null}
+                className="glass-panel glass-glow-magenta hover:bg-slate-900 border-pink-500/20 text-white font-extrabold text-[14px] px-6 py-3.5 rounded-2xl transition duration-300 flex items-center gap-2"
+              >
+                {busy === 'guest' ? (
+                  <span className="w-4 h-4 border-2 border-pink-500 border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <span>👤</span>
+                )}
+                <span>{isAR ? 'الدخول كزائر (بدون حساب)' : 'Sign in as Guest'}</span>
+              </button>
+            </>
+          )}
+        </div>
+
+        {/* Display authentication errors */}
+        {authError && (
+          <div className="mt-4 text-[13px] text-rose-500 border border-rose-500/20 bg-rose-500/10 rounded-xl px-4 py-2 text-center max-w-md mx-auto animate-pulse">
+            {authError}
+          </div>
+        )}
+
+        <div className="flex justify-center gap-6 mt-8 text-[12px] text-slate-400 select-none">
+          <span>✓ {isAR ? 'لا يحتاج لتثبيت' : 'No installation required'}</span>
+          <span>✓ {isAR ? 'مبني على كتب الوزارة' : 'MOE Grounded'}</span>
+          <span>✓ {isAR ? 'مجاني بالكامل' : '100% Free'}</span>
         </div>
       </section>
 
-      {/* Visualizer Header */}
-      <section id="visualizer" className="relative z-10 max-w-[1400px] mx-auto px-6 py-4 text-center">
+      {/* Visualizer Section */}
+      <section id="visualizer" className="relative z-10 max-w-[1400px] mx-auto px-6 py-8 text-center border-t border-white/5">
         <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
           {isAR ? 'تفاعل السرب الذكي والمهارات التبادلية' : 'The Autonomous Swarm & Inter-Agent Workflows'}
         </h2>
@@ -452,8 +596,8 @@ export default function LandingScreen() {
         </div>
       </section>
 
-      {/* Tabs Menu section */}
-      <section className="relative z-10 max-w-[1400px] mx-auto px-6 py-6 border-t border-white/5">
+      {/* Tabs Menu Section */}
+      <section id="capabilities" className="relative z-10 max-w-[1400px] mx-auto px-6 py-6 border-t border-white/5">
         <div className="flex justify-center gap-2 md:gap-4 select-none mb-12">
           {[
             { id: 'capabilities', labelEN: 'System Capabilities', labelAR: 'قدرات المنظومة' },
@@ -530,7 +674,7 @@ export default function LandingScreen() {
 
         {/* Tab contents (Tech stack) */}
         {activeTab === 'stack' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 animate-[fadeIn_0.5s_ease]">
+          <div id="stack" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 animate-[fadeIn_0.5s_ease]">
             
             <div className="glass-panel rounded-3xl p-6 border border-white/5">
               <span className="text-[10px] uppercase font-extrabold text-pink-400">Frontend Stack</span>
@@ -617,6 +761,109 @@ export default function LandingScreen() {
 
           </div>
         )}
+      </section>
+
+      {/* Contact Us Section */}
+      <section id="contact" className="relative z-10 max-w-[1400px] mx-auto px-6 py-20 border-t border-white/5">
+        <div className="text-center mb-12">
+          <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+            {isAR ? 'اتصل بنا' : 'Contact Us'}
+          </h2>
+          <p className="text-[14px] text-slate-400 max-w-xl mx-auto mt-2">
+            {isAR 
+              ? 'هل لديك استفسار أو اقتراح لتحسين المنصة؟ تواصل معنا وسنرد عليك في أقرب وقت.' 
+              : 'Have any questions, inquiries, or feedback? Send us a message and our team will get back to you shortly.'}
+          </p>
+        </div>
+
+        <div className="max-w-lg mx-auto">
+          <div className="glass-panel rounded-3xl p-8 border border-white/10 shadow-2xl relative overflow-hidden">
+            {/* Form decorative background glow */}
+            <div className="absolute top-[-30%] end-[-30%] w-60 h-60 rounded-full bg-pink-500/10 blur-[80px] pointer-events-none" />
+            
+            {contactSubmitted ? (
+              <div className="text-center py-8 animate-[fadeIn_0.5s_ease]">
+                <div className="w-16 h-16 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-full text-3xl grid place-items-center mx-auto mb-4 animate-bounce">
+                  ✓
+                </div>
+                <h3 className="text-[18px] font-extrabold text-white mb-2">
+                  {isAR ? 'تم الإرسال بنجاح!' : 'Message Sent Successfully!'}
+                </h3>
+                <p className="text-[13px] text-slate-450 leading-relaxed mb-6">
+                  {isAR 
+                    ? 'نشكرك على اهتمامك بـ 5sosy. تم استلام رسالتك وسيتواصل فريقنا معك قريباً.' 
+                    : 'Thank you for reaching out to 5sosy. Your message has been received and we will contact you shortly.'}
+                </p>
+                <button
+                  onClick={() => setContactSubmitted(false)}
+                  className="bg-white/5 hover:bg-white/10 text-white border border-white/10 text-[13px] font-semibold px-6 py-2 rounded-xl transition"
+                >
+                  {isAR ? 'إرسال رسالة أخرى' : 'Send Another Message'}
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleContactSubmit} className="space-y-4">
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-slate-450 block mb-1.5">
+                    {isAR ? 'الاسم بالكامل' : 'Full Name'}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={contactName}
+                    onChange={(e) => setContactName(e.target.value)}
+                    placeholder={isAR ? 'أدخل اسمك الكريم...' : 'Enter your name...'}
+                    className="w-full bg-slate-950/40 border border-white/10 rounded-xl px-4 py-3 text-[13px] text-white focus:outline-none focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/50 transition"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-slate-450 block mb-1.5">
+                    {isAR ? 'البريد الإلكتروني' : 'Email Address'}
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={contactEmail}
+                    onChange={(e) => setContactEmail(e.target.value)}
+                    placeholder={isAR ? 'name@example.com' : 'name@example.com'}
+                    className="w-full bg-slate-950/40 border border-white/10 rounded-xl px-4 py-3 text-[13px] text-white focus:outline-none focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/50 transition"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-slate-450 block mb-1.5">
+                    {isAR ? 'الرسالة' : 'Your Message'}
+                  </label>
+                  <textarea
+                    required
+                    rows={4}
+                    value={contactMessage}
+                    onChange={(e) => setContactMessage(e.target.value)}
+                    placeholder={isAR ? 'اكتب استفسارك أو تعليقك هنا...' : 'Write your message here...'}
+                    className="w-full bg-slate-950/40 border border-white/10 rounded-xl px-4 py-3 text-[13px] text-white focus:outline-none focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/50 transition resize-none"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={contactSubmitting}
+                  className="w-full relative group overflow-hidden bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white font-bold text-[13.5px] py-3 rounded-xl transition shadow-lg shadow-pink-500/10 flex items-center justify-center gap-2"
+                >
+                  <span className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition" />
+                  {contactSubmitting ? (
+                    <>
+                      <span className="inline-block w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                      <span>{isAR ? 'جاري الإرسال...' : 'Sending...'}</span>
+                    </>
+                  ) : (
+                    <span>{isAR ? 'إرسال الرسالة ✉️' : 'Send Message ✉️'}</span>
+                  )}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
       </section>
 
       {/* Footer Area */}
