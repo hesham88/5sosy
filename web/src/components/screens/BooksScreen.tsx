@@ -14,6 +14,7 @@ import { SUBJECT_META, HUE, type HueId } from '@/constants/subjects';
 import { callAgent, type AgentName } from '@/lib/agents';
 import type { Book, SubjectId, IngestionStatus, Video } from '@/lib/types';
 import PipelineConsole from '../sync/PipelineConsole';
+import InsightsVisualizer from '../books/InsightsVisualizer';
 
 type ActionKey = 'chat' | 'summarize' | 'explain' | 'audio' | 'quiz' | 'questions';
 
@@ -35,11 +36,15 @@ export default function BooksScreen() {
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [subjectFilter, setSubjectFilter] = useState<SubjectId | 'all'>(subjectFromUrl ?? 'all');
-  const [activeTab, setActiveTab] = useState<'official' | 'added' | 'videos'>('official');
+  const [activeTab, setActiveTab] = useState<'official' | 'added' | 'videos' | 'insights'>('official');
   const [gradeFilter, setGradeFilter] = useState<string | 'all'>('all');
   const [stageFilter, setStageFilter] = useState<'all' | 'primary' | 'preparatory' | 'secondary'>('all');
   const [typeFilter, setTypeFilter] = useState<string | 'all'>('all');
+  const [languageFilter, setLanguageFilter] = useState<string | 'all'>('all');
+  const [yearFilter, setYearFilter] = useState<string | 'all'>('all');
+  const [publisherFilter, setPublisherFilter] = useState<string | 'all'>('all');
   const [catalogQuery, setCatalogQuery] = useState('');
+  const [searchMode, setSearchMode] = useState<'semantic' | 'exact'>('semantic');
 
   const [chatInput, setChatInput] = useState('');
   const [chatMsgs, setChatMsgs] = useState<{ who: 'me' | '5sosy'; ar: string; en: string }[]>([]);
@@ -337,9 +342,36 @@ export default function BooksScreen() {
     return Array.from(types).sort();
   }, [officialBooks]);
 
+  // Languages list for active filter
+  const availableLanguages = useMemo(() => {
+    const langs = new Set<string>();
+    activeBooks.forEach(b => {
+      if (b.language) langs.add(b.language);
+    });
+    return Array.from(langs).sort();
+  }, [activeBooks]);
+
+  // Years list for active filter
+  const availableYears = useMemo(() => {
+    const years = new Set<number>();
+    activeBooks.forEach(b => {
+      if (b.year) years.add(b.year);
+    });
+    return Array.from(years).sort((a, b) => b - a); // descending order
+  }, [activeBooks]);
+
+  // Publishers list for active filter
+  const availablePublishers = useMemo(() => {
+    const publishers = new Set<string>();
+    activeBooks.forEach(b => {
+      if (b.publisher) publishers.add(b.publisher);
+    });
+    return Array.from(publishers).sort();
+  }, [activeBooks]);
+
   // Filters Books list
   const filtered = useMemo(() => {
-    if (activeTab === 'videos') return [];
+    if (activeTab === 'videos' || activeTab === 'insights') return [];
     return activeBooks.filter((b) => {
       const matchSubject = subjectFilter === 'all' || b.subject === subjectFilter;
       const matchGrade =
@@ -349,9 +381,12 @@ export default function BooksScreen() {
         b.enSub.toLowerCase().includes(gradeFilter.toLowerCase());
       const matchStage = matchesStage(b.stage);
       const matchType = typeFilter === 'all' || b.type === typeFilter;
-      return matchSubject && matchGrade && matchStage && matchType && bookMatchesQuery(b, catalogQuery);
+      const matchLanguage = languageFilter === 'all' || b.language === languageFilter;
+      const matchYear = yearFilter === 'all' || b.year === Number(yearFilter);
+      const matchPublisher = publisherFilter === 'all' || b.publisher === publisherFilter;
+      return matchSubject && matchGrade && matchStage && matchType && matchLanguage && matchYear && matchPublisher && bookMatchesQuery(b, catalogQuery);
     });
-  }, [activeBooks, subjectFilter, gradeFilter, matchesStage, typeFilter, catalogQuery, activeTab]);
+  }, [activeBooks, subjectFilter, gradeFilter, matchesStage, typeFilter, languageFilter, yearFilter, publisherFilter, catalogQuery, activeTab]);
 
   // Filters Videos list
   const filteredVideos = useMemo(() => {
@@ -394,6 +429,9 @@ export default function BooksScreen() {
     setGradeFilter('all');
     setStageFilter('all');
     setTypeFilter('all');
+    setLanguageFilter('all');
+    setYearFilter('all');
+    setPublisherFilter('all');
     setCatalogQuery('');
   };
 
@@ -447,7 +485,7 @@ export default function BooksScreen() {
       const res = await fetch('/api/books/search', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ query: searchQuery, limit: 12 })
+        body: JSON.stringify({ query: searchQuery, limit: 12, mode: searchMode })
       });
       if (res.ok) {
         const data = await res.json();
@@ -616,22 +654,56 @@ export default function BooksScreen() {
             </div>
 
             {/* Semantic AI Search bar at the top */}
-            <div className="relative flex items-center rounded-xl bg-white border border-slate-200 p-1.5 focus-within:border-sky-500 focus-within:ring-2 focus-within:ring-sky-200/60 transition">
-              <span className="text-lg px-2 text-slate-400">🔍</span>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleVectorSearch()}
-                placeholder={isAR ? 'ابحث داخل صفحات الكتب بالذكاء الاصطناعي...' : 'Semantic search inside book pages...'}
-                className="flex-1 bg-transparent border-none text-[13.5px] text-slate-800 focus:outline-none py-1.5 min-w-0"
-              />
-              <button
-                onClick={handleVectorSearch}
-                className="bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-[12.5px] px-4 py-2 rounded-lg transition shadow-sm whitespace-nowrap"
-              >
-                {isAR ? 'بحث ذكي' : 'AI Search'}
-              </button>
+            <div className="space-y-3">
+              <div className="relative flex items-center rounded-xl bg-white border border-slate-200 p-1.5 focus-within:border-sky-500 focus-within:ring-2 focus-within:ring-sky-200/60 transition">
+                <span className="text-lg px-2 text-slate-400">🔍</span>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleVectorSearch()}
+                  placeholder={
+                    searchMode === 'exact'
+                      ? (isAR ? 'ابحث عن كلمات مطابقة تماماً...' : 'Search for exact matching keywords...')
+                      : (isAR ? 'ابحث داخل صفحات الكتب بالذكاء الاصطناعي...' : 'Semantic search inside book pages...')
+                  }
+                  className="flex-1 bg-transparent border-none text-[13.5px] text-slate-800 focus:outline-none py-1.5 min-w-0"
+                />
+                <button
+                  onClick={handleVectorSearch}
+                  className="bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-[12.5px] px-4 py-2 rounded-lg transition shadow-sm whitespace-nowrap"
+                >
+                  {searchMode === 'exact'
+                    ? (isAR ? 'بحث دقيق' : 'Exact Search')
+                    : (isAR ? 'بحث ذكي' : 'AI Search')}
+                </button>
+              </div>
+              
+              {/* Search Mode Toggle */}
+              <div className="flex gap-6 px-2 text-[12px] font-semibold text-slate-600">
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <input
+                    type="radio"
+                    name="searchMode"
+                    value="semantic"
+                    checked={searchMode === 'semantic'}
+                    onChange={() => setSearchMode('semantic')}
+                    className="w-4 h-4 text-sky-600 focus:ring-sky-500 border-slate-350"
+                  />
+                  <span>🧠 {isAR ? 'بحث دلالي بالذكاء الاصطناعي (المعنى)' : 'AI Semantic Search (Meaning)'}</span>
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <input
+                    type="radio"
+                    name="searchMode"
+                    value="exact"
+                    checked={searchMode === 'exact'}
+                    onChange={() => setSearchMode('exact')}
+                    className="w-4 h-4 text-sky-600 focus:ring-sky-500 border-slate-350"
+                  />
+                  <span>📝 {isAR ? 'بحث دقيق (الكلمة المفتاحية)' : 'Exact Search (Keyword)'}</span>
+                </label>
+              </div>
             </div>
           </div>
         </div>
@@ -882,10 +954,19 @@ export default function BooksScreen() {
               setStageFilter={setStageFilter}
               typeFilter={typeFilter}
               setTypeFilter={setTypeFilter}
+              languageFilter={languageFilter}
+              setLanguageFilter={setLanguageFilter}
+              yearFilter={yearFilter}
+              setYearFilter={setYearFilter}
+              publisherFilter={publisherFilter}
+              setPublisherFilter={setPublisherFilter}
               catalogQuery={catalogQuery}
               setCatalogQuery={setCatalogQuery}
               availableGrades={availableGrades}
               availableTypes={availableTypes}
+              availableLanguages={availableLanguages}
+              availableYears={availableYears}
+              availablePublishers={availablePublishers}
               activeTab={activeTab}
             />
           </aside>
@@ -927,6 +1008,12 @@ export default function BooksScreen() {
                     label={isAR ? 'الشروحات والملخصات' : 'Videos'}
                     count={dbVideos.length}
                   />
+                  <CatalogTab
+                    active={activeTab === 'insights'}
+                    onClick={() => { setActiveTab('insights'); setGradeFilter('all'); }}
+                    label={isAR ? 'الإحصائيات والتحليلات' : 'Insights & Visualizer'}
+                    count={undefined}
+                  />
                 </div>
               </div>
 
@@ -957,7 +1044,9 @@ export default function BooksScreen() {
             </div>
 
             {/* Grid display */}
-            {activeTab === 'videos' ? (
+            {activeTab === 'insights' ? (
+              <InsightsVisualizer isAR={isAR} />
+            ) : activeTab === 'videos' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
                 {filteredVideos.map((v) => (
                   <VideoCard key={v.id} video={v} onClick={() => setSelectedVideo(v)} />
@@ -1162,10 +1251,19 @@ export default function BooksScreen() {
                 setStageFilter={(st: any) => { setStageFilter(st); setShowMobileFilters(false); }}
                 typeFilter={typeFilter}
                 setTypeFilter={(ty: any) => { setTypeFilter(ty); setShowMobileFilters(false); }}
+                languageFilter={languageFilter}
+                setLanguageFilter={(l: any) => { setLanguageFilter(l); setShowMobileFilters(false); }}
+                yearFilter={yearFilter}
+                setYearFilter={(y: any) => { setYearFilter(y); setShowMobileFilters(false); }}
+                publisherFilter={publisherFilter}
+                setPublisherFilter={(p: any) => { setPublisherFilter(p); setShowMobileFilters(false); }}
                 catalogQuery={catalogQuery}
                 setCatalogQuery={setCatalogQuery}
                 availableGrades={availableGrades}
                 availableTypes={availableTypes}
+                availableLanguages={availableLanguages}
+                availableYears={availableYears}
+                availablePublishers={availablePublishers}
                 activeTab={activeTab}
               />
             </div>
@@ -1329,10 +1427,19 @@ function FilterContent({
   setStageFilter,
   typeFilter,
   setTypeFilter,
+  languageFilter,
+  setLanguageFilter,
+  yearFilter,
+  setYearFilter,
+  publisherFilter,
+  setPublisherFilter,
   catalogQuery,
   setCatalogQuery,
   availableGrades,
   availableTypes,
+  availableLanguages,
+  availableYears,
+  availablePublishers,
   activeTab
 }: {
   isAR: boolean;
@@ -1345,10 +1452,19 @@ function FilterContent({
   setStageFilter: any;
   typeFilter: any;
   setTypeFilter: any;
+  languageFilter: any;
+  setLanguageFilter: any;
+  yearFilter: any;
+  setYearFilter: any;
+  publisherFilter: any;
+  setPublisherFilter: any;
   catalogQuery: any;
   setCatalogQuery: any;
   availableGrades: string[];
   availableTypes: string[];
+  availableLanguages: string[];
+  availableYears: number[];
+  availablePublishers: string[];
   activeTab: string;
 }) {
   return (
@@ -1429,6 +1545,63 @@ function FilterContent({
             <option value="all">{isAR ? 'كل الأنواع' : 'All Types'}</option>
             {availableTypes.map((t) => (
               <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Language Filter */}
+      {availableLanguages.length > 0 && (
+        <div>
+          <label className="block text-[11.5px] font-bold text-slate-400 uppercase mb-2">
+            {isAR ? 'اللغة:' : 'Language:'}
+          </label>
+          <select
+            value={languageFilter}
+            onChange={(e) => setLanguageFilter(e.target.value)}
+            className="w-full text-[13px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-850 focus:outline-none focus:border-sky-500 focus:bg-white transition"
+          >
+            <option value="all">{isAR ? 'كل اللغات' : 'All Languages'}</option>
+            {availableLanguages.map((l) => (
+              <option key={l} value={l}>{l === 'ar' ? (isAR ? 'عربي' : 'Arabic') : l === 'en' ? (isAR ? 'إنجليزي' : 'English') : l.toUpperCase()}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Year Filter */}
+      {availableYears.length > 0 && (
+        <div>
+          <label className="block text-[11.5px] font-bold text-slate-400 uppercase mb-2">
+            {isAR ? 'سنة النشر:' : 'Year:'}
+          </label>
+          <select
+            value={yearFilter}
+            onChange={(e) => setYearFilter(e.target.value)}
+            className="w-full text-[13px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-850 focus:outline-none focus:border-sky-500 focus:bg-white transition"
+          >
+            <option value="all">{isAR ? 'كل السنوات' : 'All Years'}</option>
+            {availableYears.map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Publisher Filter */}
+      {availablePublishers.length > 0 && (
+        <div>
+          <label className="block text-[11.5px] font-bold text-slate-400 uppercase mb-2">
+            {isAR ? 'الناشر:' : 'Publisher:'}
+          </label>
+          <select
+            value={publisherFilter}
+            onChange={(e) => setPublisherFilter(e.target.value)}
+            className="w-full text-[13px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-850 focus:outline-none focus:border-sky-500 focus:bg-white transition"
+          >
+            <option value="all">{isAR ? 'كل الناشرين' : 'All Publishers'}</option>
+            {availablePublishers.map((p) => (
+              <option key={p} value={p}>{p}</option>
             ))}
           </select>
         </div>
@@ -1624,7 +1797,7 @@ function LibraryStat({ label, value, tone }: { label: string; value: number; ton
   );
 }
 
-function CatalogTab({ active, onClick, label, count }: { active: boolean; onClick: () => void; label: string; count: number }) {
+function CatalogTab({ active, onClick, label, count }: { active: boolean; onClick: () => void; label: string; count?: number }) {
   return (
     <button
       onClick={onClick}
@@ -1633,9 +1806,11 @@ function CatalogTab({ active, onClick, label, count }: { active: boolean; onClic
       }`}
     >
       <span>{label}</span>
-      <span className={`rounded-full px-2 py-0.5 text-[11px] ${active ? 'bg-sky-50 text-sky-700' : 'bg-white/70 text-slate-500'}`}>
-        {count}
-      </span>
+      {count !== undefined && (
+        <span className={`rounded-full px-2 py-0.5 text-[11px] ${active ? 'bg-sky-50 text-sky-700' : 'bg-white/70 text-slate-500'}`}>
+          {count}
+        </span>
+      )}
     </button>
   );
 }

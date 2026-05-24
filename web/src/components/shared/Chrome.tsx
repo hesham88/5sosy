@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useApp } from './Providers';
 import { Logo } from './atoms';
+import { LanguageSwitcher } from './LanguageSwitcher';
 import { useAuth } from '@/lib/firebase/auth-context';
 import { useProfile } from '@/lib/firebase/use-profile';
 import { dicebearUrl } from '@/lib/avatar';
@@ -133,7 +134,7 @@ function UserFooter({ onPick }: { onPick?: () => void }) {
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { t, isAR, setLocale } = useApp();
+  const { t } = useApp();
   const activeKey = activeKeyFor(pathname);
 
   return (
@@ -149,13 +150,7 @@ export function Sidebar() {
       <NavList activeKey={activeKey} />
 
       <div className="px-3 pb-3">
-        <button
-          onClick={() => setLocale(isAR ? 'en' : 'ar')}
-          className="w-full flex items-center justify-center gap-2 text-[12px] font-semibold text-slate-500 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 rounded-lg py-2 transition"
-        >
-          <span>🌐</span>
-          <span className="ltr">{isAR ? 'English' : 'العربية'}</span>
-        </button>
+        <LanguageSwitcher variant="dropdown" placement="top" fullWidth />
       </div>
 
       <UserFooter />
@@ -165,7 +160,7 @@ export function Sidebar() {
 
 export function MobileBar() {
   const pathname = usePathname();
-  const { t, isAR, setLocale } = useApp();
+  const { t } = useApp();
   const { user, signOut } = useAuth();
   const [open, setOpen] = useState(false);
   const activeKey = activeKeyFor(pathname);
@@ -195,10 +190,7 @@ export function MobileBar() {
         <Logo size={32} />
         <div className="font-extrabold text-slate-900">{t.appName}</div>
         <div className="ms-auto flex items-center gap-2">
-          <button onClick={() => setLocale(isAR ? 'en' : 'ar')}
-            className="text-[12px] font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg px-2.5 py-1.5 transition">
-            {isAR ? 'EN' : 'ع'}
-          </button>
+          <LanguageSwitcher variant="dropdown" />
           {user && (
             <button
               onClick={() => void signOut()}

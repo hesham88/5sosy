@@ -11,7 +11,7 @@ import { getFirebase } from '@/lib/firebase/client';
 import { dicebearUrl, randomSeed } from '@/lib/avatar';
 import { AVATAR_SEED_PALETTE, AVATAR_STYLES } from '@/constants/onboarding';
 import type { AvatarStyle } from '@/lib/types';
-import { dirFor } from '@/i18n/config';
+import { LanguageSwitcher } from '../shared/LanguageSwitcher';
 
 type InputType = 'text' | 'number' | 'choice' | 'avatar';
 
@@ -212,7 +212,7 @@ export default function OnboardingScreen() {
 
         if (provider === 'mongodb') {
           const token = await user.getIdToken();
-          await fetch('/api/users/profile', {
+          const writeRes = await fetch('/api/users/profile', {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -220,11 +220,32 @@ export default function OnboardingScreen() {
             },
             body: JSON.stringify(profileWrite)
           });
+          if (!writeRes.ok) {
+            throw new Error(`profile save failed: HTTP ${writeRes.status}`);
+          }
+          // Verify the flag actually landed before navigating, otherwise
+          // AuthGate would see stale state and bounce us back here.
+          const verifyRes = await fetch('/api/users/profile', {
+            headers: { 'Authorization': `Bearer ${token}` },
+            cache: 'no-store',
+          });
+          if (verifyRes.ok) {
+            const verifyDoc = await verifyRes.json();
+            if (verifyDoc?.onboardingCompleted !== true) {
+              throw new Error('profile verification failed: onboardingCompleted not set');
+            }
+          }
         } else {
           await setDoc(userRef, profileWrite, { merge: true });
         }
 
-        router.replace(`/${locale}/home`);
+        // Hard navigation — bypasses Next.js client cache so AuthGate +
+        // useProfile re-evaluate from scratch with the fresh profile.
+        if (typeof window !== 'undefined') {
+          window.location.replace(`/${locale}/home`);
+        } else {
+          router.replace(`/${locale}/home`);
+        }
       } catch (e) {
         setFinishing(false);
         setError((e as Error).message || 'persist failed');
@@ -272,8 +293,11 @@ export default function OnboardingScreen() {
           <div className="font-extrabold text-slate-900 text-[17px] leading-none">{t.appName}</div>
           <div className="text-[11px] text-slate-500 mt-1">{t.appSub}</div>
         </div>
-        <div className="ms-auto flex items-center gap-2 text-[12px] text-slate-500 ltr">
-          {progress.done}/{progress.total}
+        <div className="ms-auto flex items-center gap-3">
+          <LanguageSwitcher variant="dropdown" />
+          <span className="text-[12px] text-slate-500 ltr">
+            {progress.done}/{progress.total}
+          </span>
         </div>
       </div>
 

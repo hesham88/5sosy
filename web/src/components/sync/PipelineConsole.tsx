@@ -3,8 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { doc, onSnapshot, Timestamp } from 'firebase/firestore';
 import { getFirebase } from '@/lib/firebase/client';
+import { useAuth } from '@/lib/firebase/auth-context';
 
 /* ───────────────────────── types ───────────────────────── */
+/* ... existing types omitted for brevity ... */
 
 type JobKind = 'harvester' | 'analyzer' | 'migration';
 type JobCommand = 'start' | 'pause' | 'resume' | 'stop' | 'reset';
@@ -162,6 +164,9 @@ function deriveThroughput(s: PipelineJobStatus | null, processedKey: 'downloaded
 type Props = { isAR: boolean };
 
 export default function PipelineConsole({ isAR }: Props) {
+  const { user } = useAuth();
+  const isAdmin = user?.email === 'hesham1988@gmail.com';
+
   const [harvester, setHarvester] = useState<PipelineJobStatus | null>(null);
   const [analyzer, setAnalyzer] = useState<PipelineJobStatus | null>(null);
   const [migration, setMigration] = useState<PipelineJobStatus | null>(null);
@@ -229,7 +234,23 @@ export default function PipelineConsole({ isAR }: Props) {
   };
 
   return (
-    <section className="mb-6 space-y-4">
+    <section className="relative mb-6 space-y-4">
+      {!isAdmin && (
+        <div className="absolute inset-0 z-20 bg-slate-900/40 backdrop-blur-[2px] rounded-2xl flex flex-col items-center justify-center p-6 text-center select-none animate-fade-in">
+          <div className="bg-slate-950/80 border border-white/10 backdrop-blur-md px-6 py-5 rounded-2xl max-w-sm shadow-2xl flex flex-col items-center gap-3">
+            <span className="text-3xl">🔒</span>
+            <h3 className="font-extrabold text-[15px] text-white">
+              {isAR ? 'الوصول مقتصر على المشرفين' : 'Admin Restricted Area'}
+            </h3>
+            <p className="text-[12px] text-slate-350">
+              {isAR 
+                ? 'مزامنة وإدارة خط الإنتاج متاح فقط للمشرف المرخص.' 
+                : 'Pipeline management is locked. Only accessible by authorized administrators.'}
+            </p>
+          </div>
+        </div>
+      )}
+
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-[16px] font-extrabold text-slate-900 flex items-center gap-2">

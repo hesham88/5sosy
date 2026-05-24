@@ -1,0 +1,26 @@
+Enabling required APIs...
+Operation "operations/acat.p2-119799379679-a58eb3d9-cb6f-4c04-a2e0-2594cadc23d6" finished successfully.
+ERROR: (gcloud.projects.add-iam-policy-binding) Resource in projects [khsosy:setIamPolicy] is the subject of a conflict: There were concurrent policy changes. Please retry the whole read-modify-write with exponential backoff. The request's ETag '\007\006Re\210\306\"k' did not match the current policy's ETag '\007\006Re\261\266|\265'.
+Updated IAM policy for project [khsosy].
+Updated IAM policy for project [khsosy].
+Deploying Cloud Run Job khsosybot-analyze-books to us-east4 in khsosy (builds via Cloud Build)...
+  GCS bucket  : khsosy.firebasestorage.app
+  Mount path  : /mnt/khsosy_files
+This command is equivalent to running `gcloud builds submit --tag [IMAGE] .` and `gcloud run jobs deploy khsosybot-analyze-books --image [IMAGE]`
+
+Building using Dockerfile and deploying container to Cloud Run job [khsosybot-analyze-books] in project [khsosy] region [us-east4]
+Building and creating job...
+Uploading sources................................done
+Building Container...................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................done
+Done.
+Job [khsosybot-analyze-books] has successfully been deployed.
+
+To execute this job, use:
+gcloud run jobs execute khsosybot-analyze-books
+
+Analyzer job deployed. Launch with:
+  gcloud run jobs execute khsosybot-analyze-books --region us-east4 --project khsosy
+
+Or from the web UI: Books page -> Sync Console -> Analyzer card -> Start.
+Tail logs:
+  gcloud logging tail "resource.type=cloud_run_job AND resource.labels.job_name=khsosybot-analyze-books"

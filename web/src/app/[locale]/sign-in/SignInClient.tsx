@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useApp } from '@/components/shared/Providers';
 import { useAuth } from '@/lib/firebase/auth-context';
 import { Btn, Logo } from '@/components/shared/atoms';
+import { LanguageSwitcher } from '@/components/shared/LanguageSwitcher';
 
 export default function SignInClient() {
   const { isAR, t, locale } = useApp();
@@ -55,6 +56,9 @@ export default function SignInClient() {
           <div>
             <div className="font-extrabold text-slate-900 text-[19px] leading-none">{t.appName}</div>
             <div className="text-[12px] text-slate-500 mt-1">{t.appSub}</div>
+          </div>
+          <div className="ms-auto">
+            <LanguageSwitcher variant="dropdown" />
           </div>
         </div>
 

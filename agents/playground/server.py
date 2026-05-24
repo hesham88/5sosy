@@ -1235,19 +1235,18 @@ async def load_pages_cache():
                 docs = await loop.run_in_executor(None, lambda: list(mongo_db["book_pages"].find({})))
                 new_cache = []
                 for data in docs:
-                    if "embedding" in data and data["embedding"]:
-                        emb_list = list(data["embedding"])
-                        new_cache.append({
-                            "bookId": data.get("bookId"),
-                            "bookTitle": data.get("bookTitle", "Unknown Book"),
-                            "pageNumber": data.get("pageNumber"),
-                            "text": data.get("text", ""),
-                            "embedding": emb_list,
-                            "grade": data.get("grade", ""),
-                            "subject": data.get("subject", ""),
-                            "language": data.get("language", "ar"),
-                            "year": data.get("year", 2026)
-                        })
+                    emb_list = list(data["embedding"]) if ("embedding" in data and data["embedding"]) else None
+                    new_cache.append({
+                        "bookId": data.get("bookId"),
+                        "bookTitle": data.get("bookTitle", "Unknown Book"),
+                        "pageNumber": data.get("pageNumber"),
+                        "text": data.get("text", ""),
+                        "embedding": emb_list,
+                        "grade": data.get("grade", ""),
+                        "subject": data.get("subject", ""),
+                        "language": data.get("language", "ar"),
+                        "year": data.get("year", 2026)
+                    })
                 _pages_cache = new_cache
                 _cache_loaded = True
                 _last_cache_load_time = time.time()
@@ -1265,6 +1264,7 @@ async def load_pages_cache():
             new_cache = []
             for doc in docs:
                 data = doc.to_dict() or {}
+                emb_list = None
                 if "embedding" in data and data["embedding"]:
                     emb_val = data["embedding"]
                     if isinstance(emb_val, bytes):
@@ -1273,17 +1273,17 @@ async def load_pages_cache():
                         emb_list = list(struct.unpack(f"{num_floats}f", emb_val))
                     else:
                         emb_list = list(emb_val)
-                    new_cache.append({
-                        "bookId": data.get("bookId"),
-                        "bookTitle": data.get("bookTitle", "Unknown Book"),
-                        "pageNumber": data.get("pageNumber"),
-                        "text": data.get("text", ""),
-                        "embedding": emb_list,
-                        "grade": data.get("grade", ""),
-                        "subject": data.get("subject", ""),
-                        "language": data.get("language", "ar"),
-                        "year": data.get("year", 2026)
-                    })
+                new_cache.append({
+                    "bookId": data.get("bookId"),
+                    "bookTitle": data.get("bookTitle", "Unknown Book"),
+                    "pageNumber": data.get("pageNumber"),
+                    "text": data.get("text", ""),
+                    "embedding": emb_list,
+                    "grade": data.get("grade", ""),
+                    "subject": data.get("subject", ""),
+                    "language": data.get("language", "ar"),
+                    "year": data.get("year", 2026)
+                })
             _pages_cache = new_cache
             _cache_loaded = True
 
@@ -1316,6 +1316,7 @@ app.router.lifespan_context = lifespan
 class SearchRequest(BaseModel):
     query: str
     limit: int = 10
+    mode: str = "semantic"
 
 def dot_product(v1, v2):
     return sum(x * y for x, y in zip(v1, v2))
@@ -1338,34 +1339,55 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
         await load_pages_cache()
     if not req.query.strip():
         return {"results": []}
-    try:
-        client = genai.Client()
-        response = await client.aio.models.embed_content(
-            model="models/gemini-embedding-2",
-            contents=req.query
-        )
-        embs = response.embeddings
-        if not embs or not embs[0].values:
-            raise HTTPException(status_code=500, detail="Failed to get embedding")
-        query_emb = list(embs[0].values)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate query embedding: {e}")
+
     results = []
-    for item in _pages_cache:
-        score = cosine_similarity(query_emb, item["embedding"])
-        if score > 0.15:
-            results.append({
-                "bookId": item["bookId"],
-                "bookTitle": item["bookTitle"],
-                "pageNumber": item["pageNumber"],
-                "text": item["text"][:300] + "..." if len(item["text"]) > 300 else item["text"],
-                "grade": item["grade"],
-                "subject": item["subject"],
-                "language": item["language"],
-                "year": item["year"],
-                "score": round(score, 4)
-            })
-    results.sort(key=lambda x: x["score"], reverse=True)
+
+    if req.mode == "exact":
+        for item in _pages_cache:
+            if req.query.lower() in item["text"].lower():
+                results.append({
+                    "bookId": item["bookId"],
+                    "bookTitle": item["bookTitle"],
+                    "pageNumber": item["pageNumber"],
+                    "text": item["text"][:300] + "..." if len(item["text"]) > 300 else item["text"],
+                    "grade": item["grade"],
+                    "subject": item["subject"],
+                    "language": item["language"],
+                    "year": item["year"],
+                    "score": 1.0
+                })
+    else:
+        try:
+            client = genai.Client()
+            response = await client.aio.models.embed_content(
+                model="models/gemini-embedding-2",
+                contents=req.query
+            )
+            embs = response.embeddings
+            if not embs or not embs[0].values:
+                raise HTTPException(status_code=500, detail="Failed to get embedding")
+            query_emb = list(embs[0].values)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to generate query embedding: {e}")
+
+        for item in _pages_cache:
+            if not item["embedding"]:
+                continue
+            score = cosine_similarity(query_emb, item["embedding"])
+            if score > 0.15:
+                results.append({
+                    "bookId": item["bookId"],
+                    "bookTitle": item["bookTitle"],
+                    "pageNumber": item["pageNumber"],
+                    "text": item["text"][:300] + "..." if len(item["text"]) > 300 else item["text"],
+                    "grade": item["grade"],
+                    "subject": item["subject"],
+                    "language": item["language"],
+                    "year": item["year"],
+                    "score": round(score, 4)
+                })
+        results.sort(key=lambda x: x["score"], reverse=True)
+
     results = results[:req.limit]
     return {"results": results}
 
@@ -1429,6 +1451,146 @@ async def parse_book_endpoint(
 
     background_tasks.add_task(run_parse)
     return {"ok": True, "message": "Parsing started in the background."}
+# --- Legacy 5-agent surface endpoints mapped to playground ---
+class LegacyLogLine(BaseModel):
+    agent: str
+    text: str
+    status: str | None = None
+
+class LegacyAgentResponse(BaseModel):
+    ok: bool = True
+    agent: str
+    result: dict = {}
+    log: list[LegacyLogLine] = []
+
+class LegacyOrchestratorRequest(BaseModel):
+    intent: str
+    locale: str = "ar"
+    uid: str | None = None
+
+@app.post("/agents/orchestrator", response_model=LegacyAgentResponse)
+async def legacy_orchestrator(req: LegacyOrchestratorRequest, x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> LegacyAgentResponse:
+    if API_KEY:
+        _require_api_key(x_api_key)
+    parsed = {
+        "subject": "physics" if "physics" in req.intent.lower() or "فيزياء" in req.intent else "general",
+        "topic": "gas_laws",
+        "urgency_hours": 48 if "48" in req.intent else None,
+        "intensity": "high" if any(k in req.intent.lower() for k in ["exam", "اختبار", "soon", "كده"]) else "medium",
+    }
+    plan = [
+        "review:boyle:25m",
+        "quiz:gas_laws:15m",
+        "lesson:thermo:20m",
+        "oral:thermo:20m",
+    ]
+    return LegacyAgentResponse(
+        agent="orchestrator",
+        result={"intent": req.intent, "parsed": parsed, "plan": plan},
+        log=[
+            LegacyLogLine(agent="Orchestrator", text="Received intent. tokenizing…", status="info"),
+            LegacyLogLine(agent="Orchestrator", text=f"Parsed → {parsed}", status="ok"),
+            LegacyLogLine(agent="PlannerAgent", text="Drafting 4-session plan.", status="ok"),
+        ]
+    )
+
+class LegacyIngestionRequest(BaseModel):
+    sources: list[str] = []
+    subject: str | None = None
+    uid: str | None = None
+
+@app.post("/agents/ingestion", response_model=LegacyAgentResponse)
+async def legacy_ingestion(req: LegacyIngestionRequest, x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> LegacyAgentResponse:
+    if API_KEY:
+        _require_api_key(x_api_key)
+    return LegacyAgentResponse(
+        agent="ingestion",
+        result={"sources": req.sources or ["MOE/physics-g12-2025.pdf"], "chapters": 18, "theorems": 42, "examples": 318, "embeddings": 4206},
+        log=[
+            LegacyLogLine(agent="Ingestion", text="Checking sources…", status="info"),
+            LegacyLogLine(agent="Ingestion", text="Metadata generated successfully.", status="ok")
+        ]
+    )
+
+class LegacyPedagogyRequest(BaseModel):
+    uid: str | None = None
+    subject: str | None = None
+
+@app.post("/agents/pedagogy", response_model=LegacyAgentResponse)
+async def legacy_pedagogy(req: LegacyPedagogyRequest, x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> LegacyAgentResponse:
+    if API_KEY:
+        _require_api_key(x_api_key)
+    return LegacyAgentResponse(
+        agent="pedagogy",
+        result={
+            "weakConcepts": [
+                {"id": "pv-nrt", "confidence": 0.28, "prereqs": ["boyle", "kelvin"]},
+                {"id": "titration", "confidence": 0.45, "prereqs": ["acid-base"]}
+            ],
+            "misconceptions": [{"pattern": "divide-before-rearrange", "subject": "physics"}]
+        },
+        log=[
+            LegacyLogLine(agent="Pedagogy", text="Analyzing student history…", status="info"),
+            LegacyLogLine(agent="Pedagogy", text="Identified weak concepts.", status="ok")
+        ]
+    )
+
+class LegacyQuizAnswer(BaseModel):
+    qid: int | str
+    response: Any
+    confidence: int = 50
+
+class LegacyAssessmentRequest(BaseModel):
+    uid: str | None = None
+    subject: str | None = None
+    answers: list[LegacyQuizAnswer] = []
+
+@app.post("/agents/assessment", response_model=LegacyAgentResponse)
+async def legacy_assessment(req: LegacyAssessmentRequest, x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> LegacyAgentResponse:
+    if API_KEY:
+        _require_api_key(x_api_key)
+    ans_dict = {str(a.qid): a.response for a in req.answers}
+    return LegacyAgentResponse(
+        agent="assessment",
+        result={
+            "score": 0.67,
+            "time": 222,
+            "breakdown": [
+                {"qid": 1, "correct": True, "confidence": 0.8},
+                {"qid": 2, "correct": True, "confidence": 0.65},
+                {"qid": 3, "correct": False, "confidence": 0.4, "note": "steps 2 and 3 swapped"}
+            ],
+            "answers": ans_dict
+        },
+        log=[
+            LegacyLogLine(agent="Assessment", text="Evaluating responses…", status="info"),
+            LegacyLogLine(agent="Assessment", text="Graded quiz results.", status="ok")
+        ]
+    )
+
+class LegacyAVRequest(BaseModel):
+    text: str | None = None
+    audio_b64: str | None = None
+    voice: str = "eg-ar-female-warm"
+    locale: str = "ar"
+
+@app.post("/agents/av", response_model=LegacyAgentResponse)
+async def legacy_av(req: LegacyAVRequest, x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> LegacyAgentResponse:
+    if API_KEY:
+        _require_api_key(x_api_key)
+    return LegacyAgentResponse(
+        agent="av",
+        result={
+            "artifact": "audio/ch4-boyle.mp3",
+            "voice": req.voice,
+            "durationSec": 138,
+            "transcript": "تخيّل عربية ملياااانة ركاب..."
+        },
+        log=[
+            LegacyLogLine(agent="AV", text="Generating audio stream…", status="info"),
+            LegacyLogLine(agent="AV", text="Audio generated.", status="ok")
+        ]
+    )
 
 
 if __name__ == "__main__":

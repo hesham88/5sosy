@@ -32,6 +32,7 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [searchMode, setSearchMode] = useState<'semantic' | 'exact'>('semantic');
 
   useEffect(() => {
     const provider = (process.env.NEXT_PUBLIC_DATABASE_PROVIDER || 'firestore').toLowerCase();
@@ -137,7 +138,7 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
       const res = await fetch('/api/books/search', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ query: searchQuery, limit: 10 })
+        body: JSON.stringify({ query: searchQuery, limit: 10, mode: searchMode })
       });
       if (res.ok) {
         const data = await res.json();
@@ -243,12 +244,45 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleLocalSearch()}
-                placeholder={isAR ? 'ابحث عن مفهوم...' : 'Search for a concept...'}
-                className="flex-1 bg-transparent border-none text-[12px] focus:outline-none p-1.5"
+                placeholder={
+                  searchMode === 'exact'
+                    ? (isAR ? 'ابحث عن كلمات مطابقة...' : 'Search for words...')
+                    : (isAR ? 'ابحث عن مفهوم...' : 'Search for a concept...')
+                }
+                className="flex-1 bg-transparent border-none text-[12px] focus:outline-none p-1.5 min-w-0"
               />
-              <button onClick={handleLocalSearch} className="bg-sky-600 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg">
+              <button
+                onClick={handleLocalSearch}
+                className="bg-sky-600 hover:bg-sky-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg whitespace-nowrap"
+              >
                 {isAR ? 'بحث' : 'Find'}
               </button>
+            </div>
+
+            {/* Search Mode Toggle */}
+            <div className="flex gap-4 text-[10.5px] font-semibold text-slate-550 mt-1">
+              <label className="flex items-center gap-1 cursor-pointer select-none">
+                <input
+                  type="radio"
+                  name="localSearchMode"
+                  value="semantic"
+                  checked={searchMode === 'semantic'}
+                  onChange={() => setSearchMode('semantic')}
+                  className="w-3.5 h-3.5 text-sky-600 focus:ring-sky-500 border-slate-350"
+                />
+                <span>🧠 {isAR ? 'دلالي' : 'Semantic'}</span>
+              </label>
+              <label className="flex items-center gap-1 cursor-pointer select-none">
+                <input
+                  type="radio"
+                  name="localSearchMode"
+                  value="exact"
+                  checked={searchMode === 'exact'}
+                  onChange={() => setSearchMode('exact')}
+                  className="w-3.5 h-3.5 text-sky-600 focus:ring-sky-500 border-slate-350"
+                />
+                <span>📝 {isAR ? 'دقيق' : 'Exact'}</span>
+              </label>
             </div>
 
             {searchLoading ? (
@@ -355,7 +389,9 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
           <div className="px-5 py-4 border-b border-slate-800 flex items-center gap-3 shrink-0">
             <div className="w-8 h-8 rounded-lg bg-sky-500/20 text-sky-400 grid place-items-center text-md">🦉</div>
             <div>
-              <h3 className="font-extrabold text-[14px] text-white">{isAR ? 'معلم الفيزياء الذكي' : 'AI Textbook Tutor'}</h3>
+              <h3 className="font-extrabold text-[14px] text-white">
+                {isAR ? `معلم ${subjectMeta.ar} الذكي` : `AI ${subjectMeta.en} Tutor`}
+              </h3>
               <p className="text-[11px] text-slate-400">{isAR ? 'اسألني أي شيء حول هذا الفصل' : 'Ask me anything about this page'}</p>
             </div>
           </div>

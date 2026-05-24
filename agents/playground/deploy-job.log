@@ -1,0 +1,24 @@
+Enabling required APIs...
+Operation "operations/acat.p2-119799379679-4bc7240f-9d89-4b1b-b445-522efb174b11" finished successfully.
+Updated IAM policy for project [khsosy].
+Updated IAM policy for project [khsosy].
+Updated IAM policy for project [khsosy].
+Deploying Cloud Run Job khsosybot-sync to us-east4 in khsosy (builds via Cloud Build)...
+This command is equivalent to running `gcloud builds submit --tag [IMAGE] .` and `gcloud run jobs deploy khsosybot-sync --image [IMAGE]`
+
+Building using Dockerfile and deploying container to Cloud Run job [khsosybot-sync] in project [khsosy] region [us-east4]
+Building and updating job...
+Uploading sources................................done
+Building Container.............................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................done
+Done.
+Job [khsosybot-sync] has successfully been deployed.
+
+To execute this job, use:
+gcloud run jobs execute khsosybot-sync
+
+Job deployed. Launch a one-shot execution with:
+  gcloud run jobs execute khsosybot-sync --region us-east4 --project khsosy
+
+Or trigger from the web UI: Books page ƒ+' Sync Console ƒ+' Start Sync.
+Watch from CLI:
+  gcloud logging tail "resource.type=cloud_run_job AND resource.labels.job_name=khsosybot-sync"

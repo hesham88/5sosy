@@ -17,7 +17,7 @@ const dict = {
     or: '或'
   },
   home: {
-    greet: '你好，Youssef 👋',
+    greet: '欢迎回来 👋',
     sub: '今天我们学什么？',
     intentPh: '告诉我今天你需要学习什么…',
     examples: [

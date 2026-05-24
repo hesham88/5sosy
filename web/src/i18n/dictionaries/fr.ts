@@ -17,7 +17,7 @@ const dict = {
     or: 'ou'
   },
   home: {
-    greet: 'Salut Youssef 👋',
+    greet: 'Bon retour 👋',
     sub: 'Qu’étudions-nous aujourd’hui ?',
     intentPh: 'Dites-moi ce que vous devez étudier aujourd’hui…',
     examples: [

@@ -17,7 +17,7 @@ const dict = {
     or: 'oppure'
   },
   home: {
-    greet: 'Ciao Youssef 👋',
+    greet: 'Bentornato 👋',
     sub: 'Cosa studiamo oggi?',
     intentPh: 'Dimmi cosa devi studiare oggi…',
     examples: [

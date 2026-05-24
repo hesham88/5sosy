@@ -25,9 +25,16 @@ type Variant = 'dropdown' | 'grid';
 export function LanguageSwitcher({
   variant = 'dropdown',
   className = '',
+  placement = 'bottom',
+  fullWidth = false,
 }: {
   variant?: Variant;
   className?: string;
+  /** Which way the floating menu opens. Use 'top' when anchored near the
+   *  bottom of a column (e.g. the sidebar footer) so it doesn't clip. */
+  placement?: 'bottom' | 'top';
+  /** Stretch the trigger to fill its container (sidebar). */
+  fullWidth?: boolean;
 }) {
   const { locale, setLocale } = useApp();
   const [open, setOpen] = useState(false);
@@ -64,11 +71,12 @@ export function LanguageSwitcher({
 
   // dropdown variant
   const current = LOCALE_LABELS[locale];
+  const menuPos = placement === 'top' ? 'bottom-full mb-1' : 'mt-1';
   return (
-    <div className={`relative inline-block ${className}`}>
+    <div className={`relative ${fullWidth ? 'block' : 'inline-block'} ${className}`}>
       <button
         onClick={() => setOpen((o) => !o)}
-        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-[12.5px] font-bold text-slate-700"
+        className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-[12.5px] font-bold text-slate-700 ${fullWidth ? 'w-full justify-center' : ''}`}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
@@ -86,7 +94,7 @@ export function LanguageSwitcher({
           />
           <ul
             role="listbox"
-            className="absolute z-50 mt-1 end-0 min-w-[160px] py-1 bg-white border border-slate-200 rounded-lg shadow-lg"
+            className={`absolute z-50 ${menuPos} end-0 min-w-[160px] py-1 bg-white border border-slate-200 rounded-lg shadow-lg`}
           >
             {LOCALES.map((code) => {
               const active = code === locale;
