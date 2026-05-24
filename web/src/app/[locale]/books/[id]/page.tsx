@@ -9,7 +9,6 @@ import { ChromeLayout } from '@/components/shared/Chrome';
 import { useApp } from '@/components/shared/Providers';
 import { Card, Btn, SubjectChip } from '@/components/shared/atoms';
 import { SUBJECT_META } from '@/constants/subjects';
-import { callAgent } from '@/lib/agents';
 import type { Book } from '@/lib/types';
 import { LocaleBlock } from '@/i18n/LocaleBlock';
 
@@ -25,8 +24,9 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
 
   // Chatbot state
   const [chatInput, setChatInput] = useState('');
-  const [chatMsgs, setChatMsgs] = useState<{ who: 'me' | '5sosy'; text: string }[]>([]);
+  const [chatMsgs, setChatMsgs] = useState<{ who: 'me' | '5sosy'; text: string; citations?: { pageNumber: number }[] }[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
+  const [chatSession, setChatSession] = useState<string | null>(null);
 
   // Search inside book state
   const [searchQuery, setSearchQuery] = useState('');
@@ -160,18 +160,19 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
     setChatLoading(true);
 
     try {
-      // Ground the agent in the current book
-      const res = await callAgent('orchestrator', {
-        mode: 'chat',
-        bookIds: [id],
-        message: `[Current Page context: Page ${currentPageNum} says: "${currentPage?.text?.slice(0, 1000) || ''}"] ${msg}`,
-        locale
+      // Real RAG over THIS book via the document agent (/v1/books/ask).
+      const history = chatMsgs.map(m => ({ role: m.who === 'me' ? 'user' : 'assistant', content: m.text }));
+      const res = await fetch('/api/books/ask', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ bookId: id, question: msg, locale, history, sessionId: chatSession }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (data.sessionId) setChatSession(data.sessionId);
+      const reply = data.answer ||
+        (isAR ? 'معلش، واجهت مشكلة في الوصول للمعلم الذكي.' : 'Sorry, I had trouble reaching the AI tutor.');
 
-      const reply = (res?.result as any)?.message || 
-        (isAR ? 'معلش، واجهت مشكلة في الاتصال بالمعلم الذكي.' : 'Sorry, I had trouble reaching the AI tutor.');
-      
-      setChatMsgs(prev => [...prev, { who: '5sosy', text: reply }]);
+      setChatMsgs(prev => [...prev, { who: '5sosy', text: reply, citations: data.citations || [] }]);
     } catch (err) {
       console.error('Chat error:', err);
       setChatMsgs(prev => [...prev, {
@@ -407,7 +408,20 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
                 <div key={i} className={`flex ${me ? 'justify-end' : 'justify-start'}`}>
                   <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[12.5px] leading-relaxed text-start
                     ${me ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-100'}`}>
-                    {m.text}
+                    <div className="whitespace-pre-wrap">{m.text}</div>
+                    {!me && m.citations && m.citations.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {Array.from(new Set(m.citations.map(c => c.pageNumber))).filter(Boolean).map(pn => (
+                          <button
+                            key={pn}
+                            onClick={() => setCurrentPageNum(pn as number)}
+                            className="text-[10.5px] font-bold bg-sky-500/20 text-sky-300 hover:bg-sky-500/30 rounded-md px-2 py-0.5 transition"
+                          >
+                            {isAR ? `صفحة ${pn}` : `Page ${pn}`} ↗
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               );

@@ -1576,6 +1576,139 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
 
     return {"results": await _resolve_book_titles(results)}
 
+
+# ----------------------- Document RAG (in-book tutor) -----------------------
+_ASK_LOCALE_NAMES = {
+    "ar": "Egyptian Arabic", "en": "English", "fr": "French", "de": "German",
+    "es": "Spanish", "it": "Italian", "zh": "Simplified Chinese",
+}
+
+
+async def _retrieve_book_pages(book_id: str, query: str, k: int = 6) -> list[dict]:
+    """Retrieve the most relevant pages of ONE book for a question. Prefers
+    $vectorSearch (bookId-filtered), then exact regex, then the first k pages."""
+    if os.getenv("DATABASE_PROVIDER", "firestore").lower() != "mongodb":
+        return []
+    from shared.mongodb_client import get_mongodb_client
+    _, mongo_db = get_mongodb_client()
+    loop = asyncio.get_running_loop()
+
+    def _shape(docs):
+        return [{"pageNumber": d.get("pageNumber"), "text": (d.get("text") or "")[:1500]} for d in docs]
+
+    try:
+        client = genai.Client()
+        emb = await client.aio.models.embed_content(model="models/gemini-embedding-2", contents=query)
+        qv = list(emb.embeddings[0].values)
+        pipeline = [
+            {"$vectorSearch": {
+                "index": os.getenv("MONGO_VECTOR_INDEX", "vector_index"),
+                "path": "embedding", "queryVector": qv,
+                "numCandidates": max(100, k * 20), "limit": k,
+                "filter": {"bookId": book_id},
+            }},
+            {"$project": {"_id": 0, "pageNumber": 1, "text": 1, "score": {"$meta": "vectorSearchScore"}}},
+        ]
+        docs = await loop.run_in_executor(None, lambda: list(mongo_db["book_pages"].aggregate(pipeline)))
+        if docs:
+            return _shape(docs)
+    except Exception as e:
+        print(f"ask: vectorSearch retrieve failed: {e}")
+
+    try:
+        docs = await loop.run_in_executor(None, lambda: list(mongo_db["book_pages"].find(
+            {"bookId": book_id, "text": {"$regex": query, "$options": "i"}},
+            {"pageNumber": 1, "text": 1}).limit(k)))
+        if docs:
+            return _shape(docs)
+    except Exception as e:
+        print(f"ask: regex retrieve failed: {e}")
+
+    try:
+        docs = await loop.run_in_executor(None, lambda: list(mongo_db["book_pages"].find(
+            {"bookId": book_id}, {"pageNumber": 1, "text": 1}).sort("pageNumber", 1).limit(k)))
+        return _shape(docs)
+    except Exception as e:
+        print(f"ask: fallback retrieve failed: {e}")
+    return []
+
+
+class AskRequest(BaseModel):
+    bookId: str
+    question: str
+    locale: str = "ar"
+    history: list[dict] = []          # [{role:"user"|"assistant", content:str}]
+    sessionId: str | None = None
+
+
+@app.post("/v1/books/ask")
+async def books_ask(req: AskRequest, x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> dict:
+    _require_api_key(x_api_key)
+    import uuid
+    q = req.question.strip()
+    session_id = req.sessionId or uuid.uuid4().hex
+    if not q:
+        return {"answer": "", "citations": [], "sessionId": session_id}
+
+    pages = await _retrieve_book_pages(req.bookId, q, k=6)
+    context = "\n\n".join(f"[Page {p['pageNumber']}]\n{p['text']}" for p in pages if p.get("text"))
+    locale_name = _ASK_LOCALE_NAMES.get(req.locale, "the student's language")
+
+    convo = ""
+    for m in (req.history or [])[-6:]:
+        who = "Student" if m.get("role") == "user" else "Tutor"
+        convo += f"{who}: {m.get('content', '')}\n"
+
+    system = (
+        "You are 5sosy, a warm, curious, expert private tutor for ONE specific textbook. "
+        f"Always reply in {locale_name}. Ground every answer ONLY in the BOOK PAGES provided; "
+        "if the answer is not in them, say so honestly and suggest what to search instead — "
+        "never invent facts, pages, or sources. Cite the pages you used inline like [Page N]. "
+        "Be accurate and detailed yet easy to remember; open with a brief direct answer, then a "
+        "short explanation, and end with one inviting follow-up question. Refuse unsafe or "
+        "off-topic requests politely and steer back to the book."
+    )
+    prompt = (
+        f"{system}\n\nBOOK PAGES:\n{context or '(no relevant pages found)'}\n\n"
+        f"CONVERSATION SO FAR:\n{convo}\nStudent: {q}\nTutor:"
+    )
+
+    try:
+        client = genai.Client()
+        model = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
+        resp = await client.aio.models.generate_content(model=model, contents=prompt)
+        answer = (getattr(resp, "text", None) or "").strip()
+    except Exception as e:
+        print(f"ask: generation failed: {e}")
+        raise HTTPException(status_code=502, detail=f"tutor generation failed: {e}")
+
+    citations = [{"pageNumber": p["pageNumber"], "snippet": (p.get("text") or "")[:160]} for p in pages]
+
+    # Save chat (best-effort) for memory/history.
+    if os.getenv("DATABASE_PROVIDER", "firestore").lower() == "mongodb":
+        try:
+            from datetime import datetime, timezone
+            from shared.mongodb_client import get_mongodb_client
+            _, mongo_db = get_mongodb_client()
+            now = datetime.now(timezone.utc).isoformat()
+            await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: mongo_db["book_chats"].update_one(
+                    {"_id": session_id},
+                    {"$setOnInsert": {"bookId": req.bookId, "locale": req.locale, "createdAt": now},
+                     "$set": {"updatedAt": now},
+                     "$push": {"messages": {"$each": [
+                         {"role": "user", "content": q, "at": now},
+                         {"role": "assistant", "content": answer, "citations": citations, "at": now},
+                     ]}}},
+                    upsert=True,
+                ),
+            )
+        except Exception as e:
+            print(f"ask: save chat failed: {e}")
+
+    return {"answer": answer, "citations": citations, "sessionId": session_id}
+
 class ParseBookRequest(BaseModel):
     bookId: str
     title: str
