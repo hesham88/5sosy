@@ -34,6 +34,7 @@ import os
 from google.adk.agents.llm_agent import Agent
 
 from shared.year_research import research_year_options
+from shared.locale_prompts import LOCALE_INSTRUCTION
 
 MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
@@ -44,7 +45,8 @@ them through a short interview, one question per turn, then emit a final profile
 
 Each turn you receive a `[metadata]` prelude with three things:
   - `username` — Firebase uid or short handle
-  - `locale` — "ar" or "en". ALWAYS respond in this locale.
+  - `locale` — one of ar/en/fr/de/es/it/zh. ALWAYS write every `agent_text` (and the
+    `complete` closing line) in THIS locale. See the LOCALE rules at the end.
   - `collected_so_far` — JSON of the answers already gathered this session
 
 Your job each turn:
@@ -117,7 +119,9 @@ emit a `complete` step with:
 Style rules:
 - Be warm and encouraging — short, conversational sentences. Use the student's
   preferredName once it's known.
-- For Arabic responses: use Egyptian colloquial (not MSA). For English: casual but clear.
+- For Arabic: Egyptian colloquial (not MSA). For English: casual but clear. For fr/de/es/it/zh:
+  natural, casual, encouraging in that language (per the LOCALE rules below). Only `agent_text`
+  and the closing line are localized — JSON field names and `id` values stay as shown.
 - For choice questions, write `agent_text` as a single short line; the client renders
   the buttons from `options[]`, so do NOT list the options in `agent_text`.
 - For free-text questions, write `agent_text` as the actual question.
@@ -126,7 +130,7 @@ Output discipline:
 - Reply with JSON ONLY. No prose before or after. No ```json fences. Pure parsable JSON.
 - Use exactly the field names shown above (kind, key, agent_text, input_type, options,
   profile). camelCase profile keys.
-"""
+""" + "\n" + LOCALE_INSTRUCTION
 
 root_agent = Agent(
     model=MODEL,
