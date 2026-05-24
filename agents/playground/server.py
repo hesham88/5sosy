@@ -1561,7 +1561,14 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
         if used_vector_search:
             return {"results": await _resolve_book_titles(top_matches), "engine": "vectorSearch"}
 
-        # ---- Fallback: in-memory cosine over the page cache ----
+        # On MongoDB, never run the full-collection in-memory cosine — it OOMs the
+        # container (503). $vectorSearch is the semantic path; while the Atlas index
+        # is still building (or briefly unavailable) return whatever exact found
+        # (smart mode) or empty, rather than crashing.
+        if provider == "mongodb":
+            return {"results": await _resolve_book_titles(results), "engine": "vectorSearch-pending"}
+
+        # ---- Fallback (Firestore only): in-memory cosine over the page cache ----
         if not _cache_loaded or not _pages_cache or (time.time() - _last_cache_load_time > 3600):
             await load_pages_cache()
 
