@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getAdmin } from '@/lib/firebase/admin';
 import { FieldValue } from 'firebase-admin/firestore';
+import { connectToDatabase } from '@/lib/mongodb';
 
 export const runtime = 'nodejs';
 
@@ -8,11 +9,11 @@ export async function POST(req: Request) {
   try {
     const payload = await req.json().catch(() => ({}));
     const { bookId, title, gcsUri, stage, grade, term, subject, type, language, year } = payload;
+    const provider = (process.env.DATABASE_PROVIDER || 'firestore').toLowerCase();
 
-    // 1. Create temporary doc in Firestore using admin privileges
-    const { db } = getAdmin();
-    await db.collection('books').doc(bookId).set({
-      id: bookId,
+    // 1. Create the temporary 'processing' book doc in the ACTIVE store so the
+    //    upload shows immediately and the service indexes into the same place.
+    const meta = {
       subject: subject || 'physics',
       title: title || 'Untitled Book',
       stage: stage || 'Secondary',
@@ -21,11 +22,25 @@ export async function POST(req: Request) {
       type: type || 'Added Book',
       language: language || 'ar',
       year: year || 2026,
-      status: 'processing',
+      status: 'processing' as const,
       pages: 0,
       chapters: 0,
-      createdAt: FieldValue.serverTimestamp()
-    });
+    };
+    if (provider === 'mongodb') {
+      const { db } = await connectToDatabase();
+      await db.collection('books').updateOne(
+        { _id: bookId as any },
+        { $set: { ...meta, gcsUri: gcsUri || '' }, $setOnInsert: { createdAt: new Date().toISOString() } },
+        { upsert: true }
+      );
+    } else {
+      const { db } = getAdmin();
+      await db.collection('books').doc(bookId).set({
+        id: bookId,
+        ...meta,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    }
 
     // 2. Call python service to start parsing
     let base = process.env.AGENTS_BASE_URL || process.env.NEXT_PUBLIC_AGENTS_BASE_URL || 'http://localhost:8080';

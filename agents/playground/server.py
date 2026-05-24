@@ -1818,6 +1818,58 @@ async def books_ask(req: AskRequest, x_api_key: str | None = Header(default=None
 
     return {"answer": answer, "citations": citations, "sessionId": session_id}
 
+async def index_book_to_mongo(book_id: str, ocr_results_json: str, book_metadata_json: str) -> int:
+    """Index an uploaded book's OCR'd pages into MongoDB (book_pages w/ embeddings) and
+    upsert the books doc — the mongodb counterpart of index_book_to_firestore so user
+    uploads actually become searchable / RAG-able / visible in the mongodb-backed UI."""
+    from shared.mongodb_client import get_mongodb_client
+    _, mdb = get_mongodb_client()
+    loop = asyncio.get_running_loop()
+    pages = json.loads(ocr_results_json) or []
+    if isinstance(pages, dict):
+        pages = pages.get("pages", [])
+    meta = json.loads(book_metadata_json) or {}
+    client = genai.Client()
+
+    async def _embed(text: str):
+        try:
+            r = await client.aio.models.embed_content(model="models/gemini-embedding-2", contents=text[:8000])
+            if r.embeddings and r.embeddings[0].values:
+                return list(r.embeddings[0].values)
+        except Exception as e:
+            print(f"index_book_to_mongo: embed failed: {e}")
+        return None
+
+    count = 0
+    for p in pages:
+        pn = p.get("pageNumber")
+        text = (p.get("text") or "").strip()
+        if pn is None or not text:
+            continue
+        emb = await _embed(text)
+        doc = {
+            "bookId": book_id, "pageNumber": pn, "text": text,
+            "bookTitle": meta.get("title", ""), "subject": meta.get("subject", ""),
+            "grade": meta.get("grade", ""), "language": meta.get("language", "ar"),
+            "year": meta.get("year", 2026),
+        }
+        if emb:
+            doc["embedding"] = emb
+        await loop.run_in_executor(
+            None,
+            lambda d=doc, n=pn: mdb["book_pages"].replace_one(
+                {"bookId": book_id, "pageNumber": n}, d, upsert=True),
+        )
+        count += 1
+
+    book_doc = {k: v for k, v in meta.items() if k != "id"}
+    book_doc.update({"pages": count, "status": "indexed"})
+    await loop.run_in_executor(
+        None, lambda: mdb["books"].update_one({"_id": book_id}, {"$set": book_doc}, upsert=True))
+    print(f"index_book_to_mongo: indexed {count} pages for {book_id}")
+    return count
+
+
 class ParseBookRequest(BaseModel):
     bookId: str
     title: str
@@ -1837,14 +1889,21 @@ async def parse_book_endpoint(
     x_api_key: str | None = Header(default=None, alias="X-API-Key")
 ) -> dict:
     _require_api_key(x_api_key)
-    book_ref = db.collection("books").document(req.bookId)
-    doc = book_ref.get()
-    doc_data = doc.to_dict() or {}  # type: ignore
-    # Only short-circuit if the book is actually fully indexed. The frontend
-    # creates the doc with status='processing' before calling us, so checking
-    # doc.exists alone would skip every parse.
-    if doc_data.get("status") == "indexed" and doc_data.get("pages", 0) > 0:
-        return {"ok": True, "message": "Book already indexed."}
+    provider = os.getenv("DATABASE_PROVIDER", "firestore").lower()
+
+    # Short-circuit only if already fully indexed (frontend creates a 'processing'
+    # doc first, so existence alone must not skip the parse).
+    if provider == "mongodb":
+        from shared.mongodb_client import get_mongodb_client
+        _, mdb = get_mongodb_client()
+        existing = mdb["books"].find_one({"_id": req.bookId}, {"status": 1, "pages": 1})
+        if existing and existing.get("status") == "indexed" and existing.get("pages", 0) > 0:
+            return {"ok": True, "message": "Book already indexed."}
+    else:
+        book_ref = db.collection("books").document(req.bookId)
+        doc_data = (book_ref.get().to_dict() or {})  # type: ignore
+        if doc_data.get("status") == "indexed" and doc_data.get("pages", 0) > 0:
+            return {"ok": True, "message": "Book already indexed."}
 
     async def run_parse():
         try:
@@ -1852,27 +1911,27 @@ async def parse_book_endpoint(
             pages_json = await split_pdf_to_pages(req.gcsUri, req.bookId)
             ocr_results_json = await ocr_pages_with_gemini(pages_json)
             book_metadata = {
-                "id": req.bookId,
-                "title": req.title,
-                "stage": req.stage,
-                "grade": req.grade,
-                "term": req.term,
-                "subject": req.subject,
-                "type": req.type,
-                "language": req.language,
-                "year": req.year,
-                "govUrl": "",
-                "gcsUri": req.gcsUri,
-                "chapters": 8
+                "id": req.bookId, "title": req.title, "stage": req.stage, "grade": req.grade,
+                "term": req.term, "subject": req.subject, "type": req.type, "language": req.language,
+                "year": req.year, "govUrl": "", "gcsUri": req.gcsUri, "chapters": 8,
             }
-            await index_book_to_firestore(req.bookId, ocr_results_json, json.dumps(book_metadata))
-            book_ref.update({"status": "indexed"})
+            if provider == "mongodb":
+                await index_book_to_mongo(req.bookId, ocr_results_json, json.dumps(book_metadata))
+            else:
+                await index_book_to_firestore(req.bookId, ocr_results_json, json.dumps(book_metadata))
+                db.collection("books").document(req.bookId).update({"status": "indexed"})
             print(f"Background parsing completed for added book: {req.title}")
             await load_pages_cache()
         except Exception as e:
             print(f"Error background parsing added book {req.title}: {e}")
             try:
-                book_ref.update({"status": "error", "errorMessage": str(e)[:500]})
+                if provider == "mongodb":
+                    from shared.mongodb_client import get_mongodb_client
+                    _, mdb = get_mongodb_client()
+                    mdb["books"].update_one({"_id": req.bookId},
+                                            {"$set": {"status": "error", "errorMessage": str(e)[:500]}}, upsert=True)
+                else:
+                    db.collection("books").document(req.bookId).update({"status": "error", "errorMessage": str(e)[:500]})
             except Exception as inner:
                 print(f"Failed to mark book as error: {inner}")
 
