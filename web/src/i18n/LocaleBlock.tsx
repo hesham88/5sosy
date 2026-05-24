@@ -23,7 +23,7 @@
 import { dirFor, type Locale, isLocale } from './config';
 
 const FONT_VAR: Record<Locale, string> = {
-  ar: 'var(--font-cairo), var(--font-tajawal), system-ui, sans-serif',
+  ar: 'var(--font-cairo), system-ui, sans-serif',
   en: 'var(--font-inter), system-ui, sans-serif',
   fr: 'var(--font-inter), system-ui, sans-serif',
   de: 'var(--font-inter), system-ui, sans-serif',

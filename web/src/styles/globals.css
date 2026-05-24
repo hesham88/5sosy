@@ -4,12 +4,11 @@
 
 :root {
   --font-cairo: 'Cairo', system-ui, sans-serif;
-  --font-tajawal: 'Tajawal', system-ui, sans-serif;
   --font-inter: 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 }
 
-html { font-family: var(--font-cairo), var(--font-tajawal), system-ui, sans-serif; }
+html { font-family: var(--font-cairo), system-ui, sans-serif; }
 html[lang='en'] { font-family: var(--font-inter), system-ui, sans-serif; }
 body { background: #f8fafc; color: #0f172a; }
 
