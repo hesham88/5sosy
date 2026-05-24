@@ -58,6 +58,8 @@ claude_prototype/
 coding_agent/
 docs/
 log/
+*.log
+memory/
 md/
 screenshots/
 5sosy.code-workspace

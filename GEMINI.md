@@ -34,6 +34,7 @@
   - Endpoints follow the `start` → `step` → `final` SSE pattern.
 
 ## Conventions
+- **Git Tracking:** NEVER track or commit `memory/` or `log/` directories, nor any `*.log` files. They are explicitly added to `.gitignore` to prevent session and debug pollution in the repository. Ensure this rule is strictly followed.
 - **Internationalization:** Locale-segmented routes `/[locale]/...` (`ar` default RTL, `en` toggle). Use logical CSS (`ms-*`, `me-*`, `start-*`, `end-*`) for RTL support.
 - **Security:** Firebase API keys are public by design. Sensitive credentials (API keys, tokens, MongoDB URIs) are managed via Google Secret Manager.
 - **Agent Contract:** Never unify the "floating chatbot" (`FiveSosyBot.tsx`) and the "legacy 5-agent surface"; they are distinct.
