@@ -44,6 +44,12 @@ service cloud.firestore {
       match /customBooks/{bookId}  { allow read, write: if isOwner(uid); }
     }
 
+    // Public contact submissions
+    match /contacts/{contactId} {
+      allow create: if true;
+      allow read, update, delete: if false;
+    }
+
     // Catch-all deny
     match /{document=**} { allow read, write: if false; }
   }

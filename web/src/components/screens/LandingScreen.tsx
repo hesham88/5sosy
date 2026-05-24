@@ -90,17 +90,33 @@ export default function LandingScreen() {
     }
   };
 
-  const handleContactSubmit = (e: React.FormEvent) => {
+  const handleContactSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!contactName.trim() || !contactEmail.trim() || !contactMessage.trim()) return;
     setContactSubmitting(true);
-    setTimeout(() => {
+    try {
+      const res = await fetch('/api/contacts', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: contactName.trim(),
+          email: contactEmail.trim(),
+          message: contactMessage.trim()
+        })
+      });
+      if (res.ok) {
+        setContactSubmitted(true);
+        setContactName('');
+        setContactEmail('');
+        setContactMessage('');
+      } else {
+        throw new Error('Failed to save message');
+      }
+    } catch (err) {
+      console.error('Contact submission error:', err);
+    } finally {
       setContactSubmitting(false);
-      setContactSubmitted(true);
-      setContactName('');
-      setContactEmail('');
-      setContactMessage('');
-    }, 1200);
+    }
   };
 
   // Agent Swarm Configuration
@@ -236,19 +252,19 @@ export default function LandingScreen() {
   const selectedAgent = agents.find(a => a.id === (hoveredAgent || 'orchestrator')) || agents[0];
 
   return (
-    <div className="min-h-screen relative overflow-hidden bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-950 via-indigo-950 to-slate-950 text-slate-100 font-sans scroll-smooth">
+    <div className="min-h-screen relative overflow-hidden bg-mesh text-slate-100 font-sans scroll-smooth">
       
       {/* Dynamic Background Glowing Blobs */}
-      <div className="absolute top-[-10%] start-[-10%] w-[450px] h-[450px] rounded-full bg-pink-600/10 blur-[120px] animate-blob-slow pointer-events-none" />
-      <div className="absolute top-[20%] end-[-15%] w-[500px] h-[500px] rounded-full bg-indigo-600/15 blur-[140px] animate-blob-slower pointer-events-none" />
-      <div className="absolute bottom-[-10%] start-[20%] w-[400px] h-[400px] rounded-full bg-emerald-500/10 blur-[130px] animate-blob-slow pointer-events-none" />
-      <div className="absolute bottom-[30%] end-[10%] w-[380px] h-[380px] rounded-full bg-orange-500/8 blur-[110px] animate-blob-slower pointer-events-none" />
+      <div className="absolute top-[-10%] start-[-10%] w-[450px] h-[450px] rounded-full bg-pink-600/15 blur-[120px] animate-blob-slow pointer-events-none" />
+      <div className="absolute top-[20%] end-[-15%] w-[500px] h-[500px] rounded-full bg-indigo-600/20 blur-[140px] animate-blob-slower pointer-events-none" />
+      <div className="absolute bottom-[-10%] start-[20%] w-[400px] h-[400px] rounded-full bg-emerald-500/15 blur-[130px] animate-blob-slow pointer-events-none" />
+      <div className="absolute bottom-[30%] end-[10%] w-[380px] h-[380px] rounded-full bg-orange-500/12 blur-[110px] animate-blob-slower pointer-events-none" />
 
       {/* Grid Overlay */}
       <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none" />
 
-      {/* Sticky Top Glassmorphic Navigation */}
-      <header className="sticky top-0 z-50 px-4 py-3 transition-all duration-300">
+      {/* Locked/Fixed Top Glassmorphic Navigation */}
+      <header className="fixed top-0 inset-x-0 z-50 px-4 py-3 transition-all duration-300">
         <div className="mx-auto max-w-[1400px] glass-panel rounded-2xl px-6 py-3 flex items-center justify-between shadow-2xl">
           <div className="flex items-center gap-3">
             <Logo size={36} />
@@ -328,7 +344,7 @@ export default function LandingScreen() {
       </header>
 
       {/* Hero Section */}
-      <section id="hero" className="relative z-10 max-w-[1400px] mx-auto px-6 pt-16 pb-16 flex flex-col items-center text-center">
+      <section id="hero" className="relative z-10 max-w-[1400px] mx-auto px-6 pt-32 pb-16 flex flex-col items-center text-center">
         <span className="inline-flex items-center gap-1.5 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 font-extrabold text-[11px] uppercase tracking-widest px-3 py-1 rounded-full mb-6 text-glow-indigo">
           <span>✦</span>
           <span>{isAR ? 'سرب أذكياء ثنائي اللغة للثانوية العامة' : 'AUTONOMOUS BILINGUAL AGENT SWARM'}</span>
