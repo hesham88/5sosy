@@ -1820,10 +1820,15 @@ function BookCard({ book, selected, onToggle, onViewDetails }: { book: Book; sel
   const meta = SUBJECT_META[book.subject] || { glyph: '📚', hue: 'stone', ar: book.subject, en: book.subject };
   const isLocked = book.status !== 'indexed';
   const isAdded = book.type === 'Added Book';
-  const subtitle = isAR ? book.arSub : book.enSub;
+  // Most MOE books only carry Arabic metadata; fall back across ar/en so a
+  // non-Arabic shell still shows the title/subtitle instead of a blank.
+  const pick = (ar?: string, en?: string) => (isAR ? ar || en : en || ar) || '';
+  const title = pick(book.arT, book.enT);
+  const subtitle = pick(book.arSub, book.enSub);
+  const typeLabel = pick(book.arType, book.enType);
   const details = [
-    isAR ? book.arGrade : book.enGrade,
-    isAR ? book.arTerm : book.enTerm,
+    pick(book.arGrade, book.enGrade),
+    pick(book.arTerm, book.enTerm),
     book.language ? book.language.toUpperCase() : '',
   ].filter(Boolean);
 
@@ -1842,7 +1847,7 @@ function BookCard({ book, selected, onToggle, onViewDetails }: { book: Book; sel
         <div className="relative w-[58%] max-w-[190px] aspect-[3/4] rounded-xl bg-white/92 shadow-xl border border-white/70 p-4 flex flex-col justify-between">
           <div>
             <div className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wide line-clamp-1">
-              {(isAR ? book.arType : book.enType) || (isAR ? 'كتاب' : 'Book')}
+              {typeLabel || (isAR ? 'كتاب' : 'Book')}
             </div>
             <div className="mt-3 text-5xl drop-shadow-sm">{meta.glyph}</div>
           </div>
@@ -1903,7 +1908,7 @@ function BookCard({ book, selected, onToggle, onViewDetails }: { book: Book; sel
             isLocked ? 'cursor-not-allowed' : 'hover:text-sky-700 cursor-pointer transition'
           }`}
         >
-          {isAR ? book.arT : book.enT}
+          {title}
         </button>
 
         <div className="text-[12px] text-slate-500 mt-1.5 line-clamp-2 min-h-[36px]">{subtitle}</div>
@@ -1912,7 +1917,7 @@ function BookCard({ book, selected, onToggle, onViewDetails }: { book: Book; sel
           <BookFact label={t.books.pages} value={book.pages ? String(book.pages) : '0'} />
           <BookFact label={t.books.chapters} value={book.chapters ? String(book.chapters) : '0'} />
           <BookFact label={t.books.year} value={book.year ? String(book.year) : '-'} />
-          <BookFact label={isAR ? 'النوع' : 'Type'} value={(isAR ? book.arType : book.enType) || '-'} />
+          <BookFact label={isAR ? 'النوع' : 'Type'} value={typeLabel || '-'} />
         </div>
 
         {details.length > 0 && (

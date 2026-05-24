@@ -60,11 +60,16 @@ export function Providers({
   };
 
   const setLocale = (next: Locale) => {
+    if (next === locale) return;
     document.cookie = `locale=${next}; path=/; max-age=${60 * 60 * 24 * 365}`;
     const parts = pathname.split('/');
     parts[1] = next;
-    router.push(parts.join('/'));
-    router.refresh();
+    // Preserve the query string (e.g. ?next=… on /sign-in) so switching language
+    // doesn't drop it and bounce the user. Navigating to a new locale segment
+    // already re-renders the server layout with the new dictionary, so no
+    // router.refresh() is needed (it was causing a visible flash/revert).
+    const search = typeof window !== 'undefined' ? window.location.search : '';
+    router.push(parts.join('/') + search);
   };
 
   return (

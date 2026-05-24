@@ -48,7 +48,7 @@ if (-not $repoExists) {
     --description "Cloud Run source deploys" | Out-Null
 }
 
-$envVars = "^@^GEMINI_MODEL=gemini-3.1-flash-lite@GOOGLE_GENAI_USE_VERTEXAI=FALSE@FIRESTORE_PROJECT=$Project@FIRESTORE_DATABASE=(default)"
+$envVars = "^@^GEMINI_MODEL=gemini-3.1-flash-lite@GOOGLE_GENAI_USE_VERTEXAI=FALSE@DATABASE_PROVIDER=mongodb@FIRESTORE_PROJECT=$Project@FIRESTORE_DATABASE=(default)"
 
 Write-Host "Deploying Cloud Run Job $Job to $Region in $Project (builds via Cloud Build)..." -ForegroundColor Cyan
 

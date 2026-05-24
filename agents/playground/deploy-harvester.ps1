@@ -52,7 +52,7 @@ if (-not $repoExists) {
 
 # Comma-escape: `^@^` overrides gcloud's default comma delimiter so the env
 # value can contain literal commas if we ever add any.
-$envVars = "^@^GEMINI_MODEL=gemini-3.1-flash-lite@GOOGLE_GENAI_USE_VERTEXAI=FALSE@FIRESTORE_PROJECT=$Project@FIRESTORE_DATABASE=(default)@GCS_BUCKET=khsosy.firebasestorage.app@MALLOC_TRIM_THRESHOLD_=131072@SYNC_WORKER_COUNT=3"
+$envVars = "^@^GEMINI_MODEL=gemini-3.1-flash-lite@GOOGLE_GENAI_USE_VERTEXAI=FALSE@DATABASE_PROVIDER=mongodb@FIRESTORE_PROJECT=$Project@FIRESTORE_DATABASE=(default)@GCS_BUCKET=khsosy.firebasestorage.app@MALLOC_TRIM_THRESHOLD_=131072@SYNC_WORKER_COUNT=3"
 
 Write-Host "Deploying Cloud Run Job $Job to $Region in $Project (builds via Cloud Build)..." -ForegroundColor Cyan
 

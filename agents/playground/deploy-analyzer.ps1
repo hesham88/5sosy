@@ -53,7 +53,7 @@ if (-not $repoExists) {
 
 # MALLOC_TRIM_THRESHOLD_=131072 still helps small per-page allocations return
 # to the OS quickly even though the volume mount removes the big offenders.
-$envVars = "^@^GEMINI_MODEL=gemini-3.1-flash-lite@GOOGLE_GENAI_USE_VERTEXAI=FALSE@FIRESTORE_PROJECT=$Project@FIRESTORE_DATABASE=(default)@GCS_BUCKET=$Bucket@GCS_MOUNT_PATH=$MountPath@MALLOC_TRIM_THRESHOLD_=131072@SYNC_WORKER_COUNT=3@PAGE_OCR_CONCURRENCY=15@FORCE_REANALYZE=FALSE"
+$envVars = "^@^GEMINI_MODEL=gemini-3.1-flash-lite@GOOGLE_GENAI_USE_VERTEXAI=FALSE@DATABASE_PROVIDER=mongodb@FIRESTORE_PROJECT=$Project@FIRESTORE_DATABASE=(default)@GCS_BUCKET=$Bucket@GCS_MOUNT_PATH=$MountPath@MALLOC_TRIM_THRESHOLD_=131072@SYNC_WORKER_COUNT=3@PAGE_OCR_CONCURRENCY=15@FORCE_REANALYZE=FALSE"
 
 Write-Host "Deploying Cloud Run Job $Job to $Region in $Project (builds via Cloud Build)..." -ForegroundColor Cyan
 Write-Host "  GCS bucket  : $Bucket" -ForegroundColor DarkGray

@@ -1,3 +1,5 @@
+import type { Dictionary } from '../get-dictionary';
+
 const dict = {
   appName: '5sosy',
   appSub: 'Your AI tutor',

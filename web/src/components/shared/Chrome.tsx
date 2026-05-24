@@ -78,20 +78,24 @@ function yearLabel(profile: { yearOfEducation?: string; grade?: string } | null,
 function UserFooter({ onPick }: { onPick?: () => void }) {
   const { locale, t, isAR } = useApp();
   const { user, signOut } = useAuth();
-  const { profile } = useProfile();
+  const { profile, loading: profileLoading } = useProfile();
 
-  const displayName =
-    profile?.preferredName ||
-    profile?.displayName ||
-    user?.displayName ||
-    (isAR ? 'ضيف' : 'Guest');
+  // Until the profile resolves, don't show a name — otherwise the raw Google
+  // displayName flashes ("Youssef…") and then swaps to the chosen preferredName.
+  const nameReady = !profileLoading;
+  const displayName = !nameReady
+    ? ''
+    : profile?.preferredName ||
+      profile?.displayName ||
+      user?.displayName ||
+      (isAR ? 'ضيف' : 'Guest');
   const photoUrl =
     profile?.photoURL ||
     (profile?.avatarStyle && profile?.avatarSeed
       ? dicebearUrl(profile.avatarStyle as AvatarStyle, profile.avatarSeed)
       : user?.photoURL || null);
-  const initial = (displayName || (isAR ? 'ي' : 'Y')).slice(0, 1);
-  const yearText = yearLabel(profile, isAR);
+  const initial = nameReady ? (displayName || (isAR ? 'ض' : 'G')).slice(0, 1) : '';
+  const yearText = nameReady ? yearLabel(profile, isAR) : '';
   const profileHref = user
     ? `/${locale}/u/${(profile?.username || profile?.displayName || user.displayName || 'me')
         .toLowerCase()
@@ -114,8 +118,17 @@ function UserFooter({ onPick }: { onPick?: () => void }) {
         )}
       </Link>
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-semibold text-slate-900 truncate">{displayName}</div>
-        {yearText && <div className="text-[11px] text-slate-500 truncate">{yearText}</div>}
+        {nameReady ? (
+          <>
+            <div className="text-[13px] font-semibold text-slate-900 truncate">{displayName}</div>
+            {yearText && <div className="text-[11px] text-slate-500 truncate">{yearText}</div>}
+          </>
+        ) : (
+          <div className="space-y-1.5 py-0.5">
+            <div className="h-3 w-24 rounded bg-slate-200 animate-pulse" />
+            <div className="h-2.5 w-16 rounded bg-slate-100 animate-pulse" />
+          </div>
+        )}
       </div>
       {user && (
         <button

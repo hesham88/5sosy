@@ -29,7 +29,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname() ?? '/';
   const { user, loading: authLoading, signOut } = useAuth();
-  const { profile, loading: profileLoading } = useProfile();
+  const { profile, loading: profileLoading, error: profileError } = useProfile();
 
   const firstSegment = useMemo(() => pathname.split('/').filter(Boolean)[1] ?? '', [pathname]);
   const isSignIn = firstSegment === SIGN_IN_SEGMENT;
@@ -55,6 +55,10 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
     if (isOnboarding) return; // signed-in but onboarding-in-progress: let them through
 
+    // A transient profile fetch failure must NOT be read as "onboarding
+    // incomplete" — that bounced users back into onboarding on every hiccup.
+    if (profileError) return;
+
     if (!profile || profile.onboardingCompleted !== true) {
       router.replace(`/${locale}/onboarding`);
       return;
@@ -65,6 +69,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     authLoading,
     user,
     profile,
+    profileError,
     profileLoading,
     pathname,
     locale,
@@ -88,6 +93,10 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   if (lastLogin && Date.now() - lastLogin > SESSION_MAX_AGE_MS) return null;
 
   if (isOnboarding) return <>{children}</>;
+
+  // On a transient fetch error, render the app rather than a blank/bounce —
+  // the shell tolerates a null profile (shows a neutral placeholder).
+  if (profileError) return <>{children}</>;
 
   if (!profile || profile.onboardingCompleted !== true) return null;
 

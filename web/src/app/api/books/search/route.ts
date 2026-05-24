@@ -5,7 +5,7 @@ export const runtime = 'nodejs';
 export async function POST(req: Request) {
   try {
     const payload = await req.json().catch(() => ({}));
-    const base = process.env.NEXT_PUBLIC_AGENTS_BASE_URL || 'http://localhost:8080';
+    const base = process.env.AGENTS_BASE_URL || process.env.NEXT_PUBLIC_AGENTS_BASE_URL || 'http://localhost:8080';
     const apiKey = process.env.AGENTS_API_KEY;
 
     const url = `${base.replace(/\/$/, '')}/v1/books/search`;
