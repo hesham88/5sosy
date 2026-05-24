@@ -49,5 +49,6 @@ include = [
     "migration_agent*",
     "language_detection_agent*",
     "translation_agent*",
+    "ask_me_agent*",
     "shared*"
 ]

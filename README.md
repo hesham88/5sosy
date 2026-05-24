@@ -40,9 +40,16 @@ where 81% of Egyptian secondary students currently rely on private tutors.
 │   └── .env.example   .env.local (gitignored)
 │
 ├── agents/                       # Google ADK + FastAPI service (deploys to Cloud Run)
+│   ├── playground/               # Active modular agent swarm implementation
+│   │   ├── server.py             # FastAPI entry; SSE streaming proxy
+│   │   ├── orchestrator_agent/   # Parses intents and delegates tasks
+│   │   ├── ask_me_agent/         # Semantic vector search via MongoDB
+│   │   ├── ingestion_agent/      # OCRs MOE PDFs and embeds chunks
+│   │   ├── migration_agent/      # Firestore <-> MongoDB sync jobs
+│   │   └── ...                   # harvester, analyzer, pdf_parser, etc.
 │   ├── pyproject.toml
 │   ├── Dockerfile      cloudbuild.yaml
-│   └── src/fivesosy_agents/
+│   └── src/fivesosy_agents/      # Legacy prototype implementation
 │       ├── server.py             # FastAPI entry; /agents/<name> endpoints
 │       ├── orchestrator.py  ingestion.py  pedagogy.py  assessment.py  av.py
 │       ├── schemas.py            # Pydantic request/response contracts
@@ -66,14 +73,15 @@ where 81% of Egyptian secondary students currently rely on private tutors.
 | ------------ | ------------------------------------------------------------------- |
 | Framework    | **Next.js 15** App Router, React 18, TypeScript, Tailwind CSS       |
 | Auth         | Firebase Authentication (Google + Anonymous)                        |
-| Database     | Cloud Firestore (with security rules + indexes)                     |
+| Database     | **Hybrid:** MongoDB (Agents/Vector Core) + Cloud Firestore (Real-time UI) |
+| DB Sync      | Dedicated `migration_agent` orchestrating continuous synchronization  |
 | Storage      | Firebase Storage (per-user upload scopes)                           |
 | Hosting      | Firebase **App Hosting** (Next.js SSR on Cloud Run, GitHub-driven)  |
-| Agents       | Google **ADK** + Gemini **3.1 Flash-Lite** (default for all agents) |
+| Agents       | Google **ADK Modular Swarm** + Gemini **3.1 Flash-Lite** (Default)  |
 | Multimodal   | Gemini 3.1 Flash-Lite for vision/PDF OCR                            |
-| Retrieval    | Vertex AI Vector Search (`gemini-embedding-2`)                      |
-| Agent host   | FastAPI on **Cloud Run**                                            |
-| i18n         | Arabic (RTL) + English (LTR), Cairo / Tajawal / Inter, locale cookies |
+| Retrieval    | **MongoDB Native Vector Search** (`gemini-embedding-2`)             |
+| Agent host   | FastAPI on **Cloud Run** (Main API + Background Jobs)               |
+| i18n         | Arabic (RTL) + English (LTR), CSS Logical Properties, Cairo/Inter   |
 
 ---
 
