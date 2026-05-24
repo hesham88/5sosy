@@ -1321,8 +1321,47 @@ async def load_pages_cache():
 class SearchRequest(BaseModel):
     query: str
     limit: int = 10
-    mode: str = "semantic"
+    # "smart" (default): exact-first, fall back to semantic if no hits. Also
+    # accepts "exact" / "semantic" for callers that still pin a mode.
+    mode: str = "smart"
     bookId: str | None = None
+
+
+async def _resolve_book_titles(results: list[dict]) -> list[dict]:
+    """Page docs often lack a usable bookTitle ("Unknown Book"). Resolve real
+    titles (ar + en) from the `books` collection in one batch lookup."""
+    if not results:
+        return results
+    if os.getenv("DATABASE_PROVIDER", "firestore").lower() != "mongodb":
+        return results
+    try:
+        from shared.mongodb_client import get_mongodb_client
+        _, mongo_db = get_mongodb_client()
+        ids = list({r.get("bookId") for r in results if r.get("bookId")})
+        if not ids:
+            return results
+        books = await asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: list(mongo_db["books"].find(
+                {"_id": {"$in": ids}},
+                {"title": 1, "arT": 1, "enT": 1, "arTitle": 1, "enTitle": 1, "name": 1},
+            )),
+        )
+        bmap = {b.get("_id"): b for b in books}
+        for r in results:
+            b = bmap.get(r.get("bookId"))
+            if not b:
+                continue
+            ar = b.get("arT") or b.get("arTitle") or b.get("title") or b.get("name")
+            en = b.get("enT") or b.get("enTitle") or b.get("title") or b.get("name")
+            best = ar or en
+            if best:
+                r["bookTitle"] = best
+                r["bookTitleAr"] = ar or best
+                r["bookTitleEn"] = en or best
+    except Exception as e:
+        print(f"title resolve failed: {e}")
+    return results
 
 def dot_product(v1, v2):
     return sum(x * y for x, y in zip(v1, v2))
@@ -1347,7 +1386,7 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
     provider = os.getenv("DATABASE_PROVIDER", "firestore").lower()
     results = []
 
-    if req.mode == "exact":
+    if req.mode in ("exact", "smart"):
         # Direct DB queries for exact search to prevent OOM
         if provider == "mongodb":
             try:
@@ -1411,7 +1450,8 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
                             break
             except Exception as e:
                 print(f"Firestore exact search failed: {e}")
-    else:
+
+    if req.mode == "semantic" or (req.mode == "smart" and not results):
         # Semantic search — embed the query, then prefer Atlas $vectorSearch
         # (indexed, fast). Only fall back to the in-memory cosine cache if the
         # vector index is missing/erroring, since that path scans every page
@@ -1474,7 +1514,7 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
                 print(f"$vectorSearch unavailable, falling back to in-memory cosine: {e}")
 
         if used_vector_search:
-            return {"results": top_matches, "engine": "vectorSearch"}
+            return {"results": await _resolve_book_titles(top_matches), "engine": "vectorSearch"}
 
         # ---- Fallback: in-memory cosine over the page cache ----
         if not _cache_loaded or not _pages_cache or (time.time() - _last_cache_load_time > 3600):
@@ -1534,7 +1574,7 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
 
         results = top_matches
 
-    return {"results": results}
+    return {"results": await _resolve_book_titles(results)}
 
 class ParseBookRequest(BaseModel):
     bookId: str

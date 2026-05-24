@@ -138,7 +138,7 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
       const res = await fetch('/api/books/search', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ query: searchQuery, limit: 10, mode: searchMode, bookId: id })
+        body: JSON.stringify({ query: searchQuery, limit: 10, mode: 'smart', bookId: id })
       });
       if (res.ok) {
         const data = await res.json();

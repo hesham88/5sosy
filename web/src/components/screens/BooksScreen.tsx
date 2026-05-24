@@ -80,7 +80,6 @@ export default function BooksScreen() {
   const [yearFilter, setYearFilter] = useState<string | 'all'>('all');
   const [publisherFilter, setPublisherFilter] = useState<string | 'all'>('all');
   const [catalogQuery, setCatalogQuery] = useState('');
-  const [searchMode, setSearchMode] = useState<'semantic' | 'exact'>('semantic');
 
   const [chatInput, setChatInput] = useState('');
   const [chatMsgs, setChatMsgs] = useState<{ who: 'me' | '5sosy'; ar: string; en: string }[]>([]);
@@ -538,7 +537,7 @@ export default function BooksScreen() {
       const res = await fetch('/api/books/search', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ query: searchQuery, limit: 12, mode: searchMode })
+        body: JSON.stringify({ query: searchQuery, limit: 12, mode: 'smart' })
       });
       if (res.ok) {
         const data = await res.json();
@@ -706,57 +705,23 @@ export default function BooksScreen() {
               <LibraryStat label={t.books.pages} value={totalPages} tone="sky" />
             </div>
 
-            {/* Semantic AI Search bar at the top */}
-            <div className="space-y-3">
-              <div className="relative flex items-center rounded-xl bg-white border border-slate-200 p-1.5 focus-within:border-sky-500 focus-within:ring-2 focus-within:ring-sky-200/60 transition">
-                <span className="text-lg px-2 text-slate-400">🔍</span>
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleVectorSearch()}
-                  placeholder={
-                    searchMode === 'exact'
-                      ? (isAR ? 'ابحث عن كلمات مطابقة تماماً...' : 'Search for exact matching keywords...')
-                      : (isAR ? 'ابحث داخل صفحات الكتب بالذكاء الاصطناعي...' : 'Semantic search inside book pages...')
-                  }
-                  className="flex-1 bg-transparent border-none text-[13.5px] text-slate-800 focus:outline-none py-1.5 min-w-0"
-                />
-                <button
-                  onClick={handleVectorSearch}
-                  className="bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-[12.5px] px-4 py-2 rounded-lg transition shadow-sm whitespace-nowrap"
-                >
-                  {searchMode === 'exact'
-                    ? (isAR ? 'بحث دقيق' : 'Exact Search')
-                    : (isAR ? 'بحث ذكي' : 'AI Search')}
-                </button>
-              </div>
-              
-              {/* Search Mode Toggle */}
-              <div className="flex gap-6 px-2 text-[12px] font-semibold text-slate-600">
-                <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                  <input
-                    type="radio"
-                    name="searchMode"
-                    value="semantic"
-                    checked={searchMode === 'semantic'}
-                    onChange={() => setSearchMode('semantic')}
-                    className="w-4 h-4 text-sky-600 focus:ring-sky-500 border-slate-350"
-                  />
-                  <span>🧠 {isAR ? 'بحث دلالي بالذكاء الاصطناعي (المعنى)' : 'AI Semantic Search (Meaning)'}</span>
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                  <input
-                    type="radio"
-                    name="searchMode"
-                    value="exact"
-                    checked={searchMode === 'exact'}
-                    onChange={() => setSearchMode('exact')}
-                    className="w-4 h-4 text-sky-600 focus:ring-sky-500 border-slate-350"
-                  />
-                  <span>📝 {isAR ? 'بحث دقيق (الكلمة المفتاحية)' : 'Exact Search (Keyword)'}</span>
-                </label>
-              </div>
+            {/* Unified smart search — exact-first, semantic fallback (one box, no toggle) */}
+            <div className="relative flex items-center rounded-xl bg-white border border-slate-200 p-1.5 focus-within:border-sky-500 focus-within:ring-2 focus-within:ring-sky-200/60 transition">
+              <span className="text-lg px-2 text-slate-400">🔍</span>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleVectorSearch()}
+                placeholder={isAR ? 'ابحث بأي كلمة أو سؤال داخل صفحات الكتب…' : 'Search anything inside book pages — a keyword or a question…'}
+                className="flex-1 bg-transparent border-none text-[13.5px] text-slate-800 focus:outline-none py-1.5 min-w-0"
+              />
+              <button
+                onClick={handleVectorSearch}
+                className="bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-[12.5px] px-4 py-2 rounded-lg transition shadow-sm whitespace-nowrap"
+              >
+                {isAR ? 'بحث ذكي' : 'Smart Search'}
+              </button>
             </div>
           </div>
         </div>
@@ -1337,7 +1302,7 @@ export default function BooksScreen() {
             <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
               <div>
                 <h3 className="text-[17px] font-extrabold text-slate-900 flex items-center gap-2">
-                  <span>🧠</span> {isAR ? 'نتائج البحث الدلالي (AI Vector Search)' : 'AI Semantic Search Results'}
+                  <span>🧠</span> {isAR ? 'نتائج البحث الذكي' : 'Smart Search Results'}
                 </h3>
                 <p className="text-[12px] text-slate-500 mt-0.5">
                   {isAR ? `نتائج البحث عن: "${searchQuery}"` : `Matches for: "${searchQuery}"`}
@@ -1373,7 +1338,7 @@ export default function BooksScreen() {
                       className="border border-slate-100 hover:border-sky-300 hover:shadow-md rounded-2xl p-4 bg-white/70 hover:bg-white transition cursor-pointer card-lift"
                     >
                       <div className="flex items-center justify-between mb-2">
-                        <span className="font-extrabold text-[13.5px] text-slate-950 truncate max-w-[70%]">{res.bookTitle}</span>
+                        <span className="font-extrabold text-[13.5px] text-slate-950 truncate max-w-[70%]">{(isAR ? res.bookTitleAr : res.bookTitleEn) || res.bookTitle}</span>
                         <span className="text-[11px] bg-sky-50 text-sky-700 font-bold px-2 py-0.5 rounded-lg">
                           Score: {Math.round(res.score * 100)}%
                         </span>
