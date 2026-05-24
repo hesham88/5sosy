@@ -42,7 +42,7 @@ export default function HomeScreen() {
           <div className="hidden lg:flex items-center gap-3 text-[12px] text-slate-500">
             <span className="flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              {isAR ? '٥ وكلاء نشطين' : '5 agents online'}
+              {t.common.agentsOnline}
             </span>
           </div>
         </div>
@@ -67,7 +67,7 @@ export default function HomeScreen() {
 const IntentInput = forwardRef<HTMLTextAreaElement, {
   value: string; setValue: (v: string) => void; onSubmit: (v: string) => void; parsing: boolean;
 }>(function IntentInput({ value, setValue, onSubmit, parsing }, ref) {
-  const { t, isAR, locale } = useApp();
+  const { t, locale } = useApp();
   const parseLines: AgentLogLine[] = [
     { agent: 'Orchestrator', text: 'Received intent. tokenizing Egyptian Arabic…' },
     { agent: 'Orchestrator', text: 'Subject = Physics · Topic = Gas Laws · Urgency = 48h', status: 'ok' },
@@ -79,7 +79,7 @@ const IntentInput = forwardRef<HTMLTextAreaElement, {
   return (
     <div className="relative">
       <div className="absolute -top-3 start-5 inline-flex items-center gap-1.5 bg-sky-600 text-white text-[11px] font-bold px-2.5 py-1 rounded-md shadow-sm">
-        <span>✦</span><span>{isAR ? 'اسأل خصوصي' : 'Ask 5sosy'}</span>
+        <span>✦</span><span>{t.home.askBot}</span>
       </div>
       <div className="bg-white rounded-2xl border-2 border-slate-200 hover:border-sky-300 focus-within:border-sky-500 transition shadow-sm">
         <textarea
@@ -92,15 +92,15 @@ const IntentInput = forwardRef<HTMLTextAreaElement, {
           dir={dirFor(locale)}
         />
         <div className="flex items-center gap-2 px-3 pb-3">
-          <button className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100" title={isAR ? 'صوت' : 'Voice'}>🎙️</button>
-          <button className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100" title={isAR ? 'مرفق' : 'Attach'}>📎</button>
+          <button className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100" title={t.home.voice}>🎙️</button>
+          <button className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100" title={t.home.attach}>📎</button>
           <div className="flex-1" />
-          <span className="text-[11px] text-slate-400 hidden sm:inline">{isAR ? 'اضغط Enter للبدء' : 'Press Enter to start'}</span>
+          <span className="text-[11px] text-slate-400 hidden sm:inline">{t.home.pressEnter}</span>
           <Btn kind="primary" disabled={!value.trim() || parsing}
                onClick={() => onSubmit(value || t.home.examples[0])}>
             {parsing
-              ? <><span className="inline-block w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" /> {isAR ? 'بحلّل…' : 'Parsing…'}</>
-              : <>{isAR ? 'يلا بينا' : "Let's go"} <span className="ltr">→</span></>}
+              ? <><span className="inline-block w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" /> {t.home.parsing}</>
+              : <>{t.home.letsGo} <span className="ltr">→</span></>}
           </Btn>
         </div>
       </div>
@@ -141,7 +141,7 @@ function TodayPlan() {
         </div>
         <div className="ms-auto text-end">
           <div className="text-[20px] font-extrabold text-slate-900 ltr">{Math.round(totalMin / 60 * 10) / 10}h</div>
-          <div className="text-[11px] text-slate-500">{isAR ? `${HOME_PLAN.length} جلسات` : `${HOME_PLAN.length} sessions`}</div>
+          <div className="text-[11px] text-slate-500">{HOME_PLAN.length} {t.plan.sessions}</div>
         </div>
       </div>
       <div className="px-5">
@@ -149,7 +149,7 @@ function TodayPlan() {
           <div className="h-full bg-sky-500 bar-fill" style={{ width: `${pct}%` }} />
         </div>
         <div className="flex justify-between text-[10.5px] text-slate-400 mt-1 ltr">
-          <span>{doneMin}m done</span><span>{totalMin}m total</span>
+          <span>{doneMin}m {t.home.mDone}</span><span>{totalMin}m {t.home.mTotal}</span>
         </div>
       </div>
 
@@ -214,15 +214,15 @@ function WeakTopicsRow() {
           <div className="font-extrabold text-slate-900 text-[17px] flex items-center gap-2">
             {t.home.weak}
             <span className="text-[10.5px] font-bold text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded">
-              {isAR ? 'وكيل التحليل التربوي' : 'Pedagogy agent'}
+              {t.home.pedagogyAgent}
             </span>
           </div>
           <div className="text-[12px] text-slate-500 mt-0.5">
-            {isAR ? 'مفاهيم ضعفت في تقييماتك الأخيرة' : 'Concepts your last assessments flagged'}
+            {t.home.weakSub}
           </div>
         </div>
         <button className="ms-auto text-[12px] font-semibold text-sky-700 hover:text-sky-800">
-          {isAR ? 'الكل ←' : 'See all →'}
+          {t.common.seeAll} {isAR ? '←' : '→'}
         </button>
       </div>
 
@@ -236,8 +236,8 @@ function WeakTopicsRow() {
               </div>
               <div className="font-bold text-[14px] text-slate-900 mt-2 leading-snug">{isAR ? w.arT : w.enT}</div>
               <div className="flex items-center justify-between mt-3 text-[11px]">
-                <span className="ltr text-slate-500">{Math.round(w.conf * 100)}% mastery</span>
-                <span className="text-sky-700 font-semibold">{isAR ? 'تمرّن' : 'Drill'} {isAR ? '←' : '→'}</span>
+                <span className="ltr text-slate-500">{Math.round(w.conf * 100)}% {t.subjects.mastery}</span>
+                <span className="text-sky-700 font-semibold">{t.subjects.drill} {isAR ? '←' : '→'}</span>
               </div>
             </div>
           ))}
@@ -248,7 +248,7 @@ function WeakTopicsRow() {
 }
 
 function StreakCard({ pulse }: { pulse: boolean }) {
-  const { isAR, streak, xp, t } = useApp();
+  const { streak, xp, t } = useApp();
   const days = [-3, -2, -1, 0, 1, 2, 3];
   return (
     <Card className={`overflow-hidden relative ${pulse ? 'ring-2 ring-amber-400' : ''}`}>
@@ -283,7 +283,7 @@ function StreakCard({ pulse }: { pulse: boolean }) {
           })}
         </div>
         <div className="text-[11.5px] text-slate-500 text-center mt-2">
-          {isAR ? 'استمر! متبقي ٣ أيام لشارة الأسبوع 🏅' : 'Keep going! 3 days to weekly badge 🏅'}
+          {t.home.streakHint}
         </div>
       </div>
     </Card>
@@ -306,11 +306,11 @@ function UpcomingExams() {
               <div className={`w-9 h-9 rounded-lg grid place-items-center text-lg ${HUE[m.hue].bg}`}>{m.glyph}</div>
               <div className="flex-1 min-w-0">
                 <div className="text-[13px] font-semibold text-slate-900 truncate">{isAR ? u.arT : u.enT}</div>
-                <div className="text-[11px] text-slate-500">{isAR ? `خلال ${u.days} أيام` : `In ${u.days} days`}</div>
+                <div className="text-[11px] text-slate-500">{t.home.inDays.replace('{n}', String(u.days))}</div>
               </div>
               {u.urgent && (
                 <span className="text-[10.5px] font-bold text-rose-600 bg-rose-100 px-1.5 py-0.5 rounded uppercase">
-                  {isAR ? 'قريب' : 'soon'}
+                  {t.common.soon}
                 </span>
               )}
             </div>

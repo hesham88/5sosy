@@ -8,7 +8,7 @@ import { AgentLog, Btn, Card, SubjectChip, type AgentLogLine } from '../shared/a
 import { QUIZ_QUESTIONS } from '@/constants/seed-data';
 
 export default function QuizScreen() {
-  const { isAR, locale, bumpStreak } = useApp();
+  const { isAR, t, locale, bumpStreak } = useApp();
   const router = useRouter();
   const [idx, setIdx] = useState(0);
   const [answers, setAnswers] = useState<Record<number, unknown>>({});
@@ -34,7 +34,7 @@ export default function QuizScreen() {
         <div className="flex items-center gap-2 text-[12.5px] text-slate-500">
           <SubjectChip id="physics" size="sm" />
           <span className="text-slate-300">/</span>
-          <span className="text-slate-900 font-semibold">{isAR ? 'اختبار سريع' : 'Quick check'}</span>
+          <span className="text-slate-900 font-semibold">{t.quiz.quickCheck}</span>
         </div>
         <div className="ms-auto flex items-center gap-3">
           <span className="text-[12px] text-slate-500 ltr font-mono">{idx + 1} / {QUIZ_QUESTIONS.length}</span>
@@ -50,11 +50,11 @@ export default function QuizScreen() {
         {!showResult ? (
           <>
             <div className="flex items-center gap-2 mb-3">
-              <span className="text-[10.5px] font-bold text-slate-400 uppercase tracking-wider ltr">Question {idx + 1}</span>
+              <span className="text-[10.5px] font-bold text-slate-400 uppercase tracking-wider">{t.quiz.question} {idx + 1}</span>
               <span className="text-[10.5px] font-bold bg-violet-50 text-violet-700 px-1.5 py-0.5 rounded uppercase">
-                {q.kind === 'mcq' ? (isAR ? 'اختر' : 'MCQ')
-                  : q.kind === 'short' ? (isAR ? 'إجابة قصيرة' : 'Short')
-                  : (isAR ? 'ترتيب' : 'Order')}
+                {q.kind === 'mcq' ? t.quiz.mcq
+                  : q.kind === 'short' ? t.quiz.short
+                  : t.quiz.order}
               </span>
             </div>
             <Card className="p-7">
@@ -93,24 +93,24 @@ export default function QuizScreen() {
 
               <div className="mt-7 pt-5 border-t border-slate-100">
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="text-[12.5px] font-bold text-slate-700">{isAR ? 'ايه نسبة تأكدك؟' : 'How confident are you?'}</span>
+                  <span className="text-[12.5px] font-bold text-slate-700">{t.quiz.confidence}</span>
                   <span className="ms-auto ltr text-[13px] font-extrabold text-slate-900 tabular-nums">{conf}%</span>
                 </div>
                 <input type="range" min="0" max="100" value={conf}
                   onChange={(e) => setConf(Number(e.target.value))} className="w-full accent-sky-600" />
                 <div className="flex justify-between text-[10.5px] text-slate-400 mt-1 ltr">
-                  <span>0 · {isAR ? 'مش متأكد' : 'no idea'}</span>
-                  <span>100 · {isAR ? 'متأكد جدًا' : 'certain'}</span>
+                  <span>0 · {t.quiz.noIdea}</span>
+                  <span>100 · {t.quiz.certain}</span>
                 </div>
               </div>
             </Card>
 
             <div className="flex justify-between mt-6">
               <Btn kind="ghost" onClick={() => idx > 0 ? setIdx(idx - 1) : router.push(`/${locale}/session`)}>
-                {isAR ? '→ السابق' : '← Prev'}
+                {isAR ? '→' : '←'} {t.quiz.prev}
               </Btn>
               <Btn kind="primary" size="lg" disabled={ans === undefined || ans === null || ans === ''} onClick={submit}>
-                {idx < QUIZ_QUESTIONS.length - 1 ? (isAR ? 'التالي' : 'Next') : (isAR ? 'سلّم الإجابات' : 'Submit')} <span className="ltr">→</span>
+                {idx < QUIZ_QUESTIONS.length - 1 ? t.cta.next : t.quiz.submit} <span className="ltr">→</span>
               </Btn>
             </div>
           </>
@@ -127,7 +127,7 @@ function OrderedList({ question, answer, setAnswer }: {
   answer: string[] | undefined;
   setAnswer: (v: string[]) => void;
 }) {
-  const { isAR } = useApp();
+  const { isAR, t } = useApp();
   const order = answer ?? question.items.map((i) => i.id);
   const byId = Object.fromEntries(question.items.map((i) => [i.id, i]));
   const move = (i: number, dir: number) => {
@@ -139,7 +139,7 @@ function OrderedList({ question, answer, setAnswer }: {
   };
   return (
     <div>
-      <div className="text-[11.5px] text-slate-500 mb-3">{isAR ? 'استخدم الأسهم لترتيب الخطوات' : 'Use the arrows to order the steps'}</div>
+      <div className="text-[11.5px] text-slate-500 mb-3">{t.quiz.orderHint}</div>
       <div className="space-y-2">
         {order.map((id, i) => {
           const it = byId[id];
@@ -162,7 +162,7 @@ function OrderedList({ question, answer, setAnswer }: {
 }
 
 function QuizResult({ onContinue }: { onContinue: () => void }) {
-  const { isAR, locale } = useApp();
+  const { t, locale } = useApp();
   const router = useRouter();
   const lines: AgentLogLine[] = [
     { agent: 'AssessmentAgent', text: 'Scoring 3 responses…', status: 'info' },
@@ -179,18 +179,18 @@ function QuizResult({ onContinue }: { onContinue: () => void }) {
     <div>
       <div className="text-center mb-6">
         <div className="inline-block w-20 h-20 rounded-full bg-emerald-500 text-white grid place-items-center text-4xl mb-3 shadow-lg shadow-emerald-200">✓</div>
-        <h1 className="text-2xl font-extrabold text-slate-900">{isAR ? 'تمام كده!' : 'Nice work!'}</h1>
-        <p className="text-slate-500 mt-1 text-[14px]">{isAR ? 'حلّلنا إجاباتك — شوف اللي لقيناه:' : "We analyzed your answers — here's what we found:"}</p>
+        <h1 className="text-2xl font-extrabold text-slate-900">{t.quiz.niceWork}</h1>
+        <p className="text-slate-500 mt-1 text-[14px]">{t.quiz.analyzed}</p>
       </div>
 
       <Card className="p-6 mb-5">
         <div className="grid grid-cols-3 gap-3 text-center">
           <div>
-            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">{isAR ? 'الدرجة' : 'Score'}</div>
+            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">{t.quiz.score}</div>
             <div className="text-3xl font-extrabold text-emerald-600 ltr mt-1">67<span className="text-base text-slate-400">%</span></div>
           </div>
           <div className="border-x border-slate-100">
-            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">{isAR ? 'الوقت' : 'Time'}</div>
+            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">{t.quiz.time}</div>
             <div className="text-3xl font-extrabold text-slate-900 ltr mt-1">3:42</div>
           </div>
           <div>
@@ -206,18 +206,17 @@ function QuizResult({ onContinue }: { onContinue: () => void }) {
       </div>
 
       <Card className="p-5 bg-gradient-to-br from-sky-50 to-white border-sky-200 mb-6">
-        <div className="text-[11px] font-bold text-sky-700 uppercase tracking-wider mb-2">{isAR ? 'الخطوة الجاية' : 'What to study next'}</div>
-        <div className="font-extrabold text-slate-900 text-[18px] mb-1">{isAR ? 'تمرين على عزل المتغيرات في معادلات الغاز' : 'Isolating variables in gas equations'}</div>
+        <div className="text-[11px] font-bold text-sky-700 uppercase tracking-wider mb-2">{t.quiz.studyNext}</div>
+        <div className="font-extrabold text-slate-900 text-[18px] mb-1">{t.quiz.nextTopic}</div>
         <div className="text-[13px] text-slate-600">
-          {isAR ? 'تمرين موجّه ١٢ دقيقة + ٤ مسائل تطبيقية، بناءً على الخطأ في السؤال ٣.'
-                : '12-min focused drill + 4 application problems, based on your Q3 slip.'}
+          {t.quiz.nextTopicSub}
         </div>
       </Card>
 
       <div className="flex gap-3">
-        <Btn kind="outline" className="flex-1" onClick={() => router.push(`/${locale}/home`)}>{isAR ? 'الرئيسية' : 'Back home'}</Btn>
+        <Btn kind="outline" className="flex-1" onClick={() => router.push(`/${locale}/home`)}>{t.quiz.backHome}</Btn>
         <Btn kind="primary" size="lg" className="flex-[2]" onClick={onContinue}>
-          {isAR ? 'يلا للامتحان الشفهي' : 'Try oral exam'} <span className="ltr">→</span>
+          {t.quiz.tryOral} <span className="ltr">→</span>
         </Btn>
       </div>
     </div>

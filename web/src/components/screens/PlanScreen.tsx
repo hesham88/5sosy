@@ -73,7 +73,7 @@ export default function PlanScreen() {
                   </div>
                   <div className="text-[22px] font-extrabold leading-none mt-1 ltr">{d.date}</div>
                   <div className={`text-[10.5px] mt-1 ltr ${isActive ? 'text-sky-100' : 'text-slate-400'}`}>
-                    {minutes}m · {d.blocks.length} {isAR ? 'جلسة' : 'sess.'}
+                    {minutes}m · {d.blocks.length} {t.plan.sessions}
                   </div>
                   {isToday && !isActive && (
                     <div className="text-[9px] font-bold text-amber-700 mt-1">{t.plan.today}</div>
@@ -161,7 +161,7 @@ export default function PlanScreen() {
                 <Row label={t.plan.remaining} value={`${totalMin} ${t.plan.minutes}`} tone="amber" />
               </div>
               <div className="border-t border-slate-100 mt-4 pt-4">
-                <div className="text-[12px] text-slate-500 mb-1">{isAR ? 'إجمالي الأسبوع' : 'Week total'}</div>
+                <div className="text-[12px] text-slate-500 mb-1">{t.plan.weekTotal}</div>
                 <div className="text-[22px] font-extrabold text-slate-900 ltr">
                   {Math.round(weekMin / 60 * 10) / 10}h
                 </div>
@@ -170,7 +170,7 @@ export default function PlanScreen() {
 
             <Card className="p-5">
               <div className="font-extrabold text-slate-900 text-[15px] mb-3 flex items-center gap-2">
-                <span>📊</span>{isAR ? 'توزيع الأسبوع' : 'Week distribution'}
+                <span>📊</span>{t.plan.weekDistribution}
               </div>
               <div className="space-y-2">
                 {bySubject(WEEK_PLAN).map((row) => {

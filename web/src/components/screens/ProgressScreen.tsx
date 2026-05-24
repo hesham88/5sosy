@@ -8,21 +8,21 @@ import { SUBJECT_META, HUE } from '@/constants/subjects';
 import type { SubjectId } from '@/lib/types';
 
 export default function ProgressScreen() {
-  const { isAR } = useApp();
+  const { t } = useApp();
+  const p = t.progress;
   return (
     <ChromeLayout>
       <div className="px-5 lg:px-10 py-6 lg:py-8 max-w-[1400px]">
         <div className="flex items-end justify-between gap-4 mb-6">
           <div>
-            <h1 className="text-2xl lg:text-3xl font-extrabold text-slate-900">{isAR ? 'تقدمك' : 'Your progress'}</h1>
+            <h1 className="text-2xl lg:text-3xl font-extrabold text-slate-900">{p.title}</h1>
             <p className="text-slate-500 mt-1 text-[14px]">
-              {isAR ? 'صورة كاملة من ٥ وكلاء بيرصدوا كل تفصيلة في مذاكرتك.'
-                    : 'A full picture from 5 agents tracking everything you study.'}
+              {p.sub}
             </p>
           </div>
           <div className="hidden lg:flex items-center gap-2">
-            <Btn kind="outline" size="sm">📤 {isAR ? 'مشاركة' : 'Share'}</Btn>
-            <Btn kind="primary" size="sm">📄 {isAR ? 'تقرير ولي الأمر' : 'Parent summary'}</Btn>
+            <Btn kind="outline" size="sm">📤 {p.share}</Btn>
+            <Btn kind="primary" size="sm">📄 {p.parentReport}</Btn>
           </div>
         </div>
 
@@ -44,12 +44,12 @@ export default function ProgressScreen() {
 }
 
 function StatsRow() {
-  const { isAR, streak, xp } = useApp();
+  const { t, streak, xp } = useApp();
   const stats = [
-    { k: isAR ? 'أيام متواصلة' : 'Day streak',        v: streak,               sub: '🔥',   accent: 'text-amber-600' },
-    { k: isAR ? 'XP إجمالي'    : 'Total XP',          v: xp.toLocaleString(),  sub: '✦',   accent: 'text-sky-600' },
-    { k: isAR ? 'ساعات مذاكرة' : 'Study hours',       v: 38,                   sub: '⏱️',   accent: 'text-slate-900' },
-    { k: isAR ? 'مفاهيم مُتقنة' : 'Concepts mastered', v: 47,                   sub: '🧩',   accent: 'text-emerald-600' }
+    { k: t.progress.dayStreak,        v: streak,               sub: '🔥',   accent: 'text-amber-600' },
+    { k: t.progress.totalXp,          v: xp.toLocaleString(),  sub: '✦',   accent: 'text-sky-600' },
+    { k: t.progress.studyHours,       v: 38,                   sub: '⏱️',   accent: 'text-slate-900' },
+    { k: t.progress.conceptsMastered, v: 47,                   sub: '🧩',   accent: 'text-emerald-600' }
   ];
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -69,7 +69,7 @@ function StatsRow() {
 }
 
 function HeatmapCard() {
-  const { isAR } = useApp();
+  const { t } = useApp();
   const cols = 26;
   const data = useMemo(() => {
     const out: number[][] = [];
@@ -92,19 +92,19 @@ function HeatmapCard() {
   }, []);
   const totalDays = data.flat().filter((v) => v > 0).length;
 
-  const months = isAR ? ['ينا','فبر','مار','أبر','ماي','يون'] : ['Dec','Jan','Feb','Mar','Apr','May'];
+  const months = t.progress.months;
 
   return (
     <Card className="p-5">
       <div className="flex items-center gap-3 mb-4">
-        <div className="font-extrabold text-slate-900 text-[15px]">{isAR ? 'خريطة مذاكرتك' : 'Study heatmap'}</div>
+        <div className="font-extrabold text-slate-900 text-[15px]">{t.progress.studyHeatmap}</div>
         <div className="text-[12px] text-slate-500">
-          {isAR ? `${totalDays} يوم نشط آخر ٦ شهور` : `${totalDays} active days in last 6 months`}
+          {t.progress.activeDays.replace('{n}', String(totalDays))}
         </div>
-        <div className="ms-auto flex items-center gap-1.5 text-[10.5px] text-slate-500 ltr">
-          <span>less</span>
+        <div className="ms-auto flex items-center gap-1.5 text-[10.5px] text-slate-500">
+          <span>{t.progress.less}</span>
           {[0,1,2,3,4].map((l) => <span key={l} className={`hm${l} w-3 h-3 rounded-sm`} />)}
-          <span>more</span>
+          <span>{t.progress.more}</span>
         </div>
       </div>
 
@@ -127,7 +127,7 @@ function HeatmapCard() {
 }
 
 function ConceptGraphCard() {
-  const { isAR } = useApp();
+  const { t } = useApp();
   const nodes = [
     { id: 'pv',     x:  90, y:  60, ar: 'P·V=k',      en: 'P·V=k',        status: 'mastered' as const },
     { id: 'boyle',  x: 230, y:  60, ar: 'بويل',        en: 'Boyle',         status: 'mastered' as const },
@@ -151,11 +151,11 @@ function ConceptGraphCard() {
   return (
     <Card className="p-5">
       <div className="flex items-center gap-3 mb-4">
-        <div className="font-extrabold text-slate-900 text-[15px]">{isAR ? 'خريطة المفاهيم — فيزياء' : 'Concept graph — Physics'}</div>
+        <div className="font-extrabold text-slate-900 text-[15px]">{t.progress.conceptGraph}</div>
         <div className="ms-auto flex items-center gap-3 text-[11.5px]">
-          <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-sky-600" /> {isAR ? 'مُتقن' : 'mastered'}</span>
-          <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> {isAR ? 'متوسط' : 'in progress'}</span>
-          <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-slate-400" /> {isAR ? 'ضعيف' : 'weak'}</span>
+          <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-sky-600" /> {t.progress.mastered}</span>
+          <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> {t.progress.inProgress}</span>
+          <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-slate-400" /> {t.progress.weak}</span>
         </div>
       </div>
 
@@ -185,7 +185,7 @@ function ConceptGraphCard() {
 }
 
 function MasteryCard() {
-  const { isAR } = useApp();
+  const { t } = useApp();
   const subjects: { id: SubjectId; v: number }[] = [
     { id: 'physics',   v: 0.72 },
     { id: 'chemistry', v: 0.61 },
@@ -195,7 +195,7 @@ function MasteryCard() {
   ];
   return (
     <Card className="p-5">
-      <div className="font-extrabold text-slate-900 text-[15px] mb-4">{isAR ? 'إتقان المواد' : 'Per-subject mastery'}</div>
+      <div className="font-extrabold text-slate-900 text-[15px] mb-4">{t.progress.perSubjectMastery}</div>
       <div className="space-y-3.5">
         {subjects.map((s) => {
           const m = SUBJECT_META[s.id];
@@ -218,53 +218,53 @@ function MasteryCard() {
 }
 
 function ParentSummaryCard() {
-  const { isAR } = useApp();
+  const { t } = useApp();
   return (
     <Card className="p-5 bg-gradient-to-br from-amber-50 to-white border-amber-200">
       <div className="flex items-start gap-3">
         <div className="text-3xl">📄</div>
         <div>
-          <div className="font-extrabold text-slate-900 text-[15px]">{isAR ? 'ملخص ولي الأمر' : 'Parent summary'}</div>
-          <div className="text-[12.5px] text-slate-600 mt-0.5">{isAR ? 'تقرير PDF لأسبوع كامل، جاهز للإرسال.' : 'Weekly PDF report, ready to share.'}</div>
+          <div className="font-extrabold text-slate-900 text-[15px]">{t.progress.parentSummary}</div>
+          <div className="text-[12.5px] text-slate-600 mt-0.5">{t.progress.parentSummarySub}</div>
         </div>
       </div>
       <div className="mt-4 grid grid-cols-3 gap-2 text-center">
         <div className="bg-white rounded-lg p-2 border border-amber-100">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{isAR ? 'ساعات' : 'Hours'}</div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{t.progress.hours}</div>
           <div className="font-extrabold ltr text-slate-900">9.4</div>
         </div>
         <div className="bg-white rounded-lg p-2 border border-amber-100">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{isAR ? 'اختبارات' : 'Quizzes'}</div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{t.progress.quizzes}</div>
           <div className="font-extrabold ltr text-slate-900">7</div>
         </div>
         <div className="bg-white rounded-lg p-2 border border-amber-100">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{isAR ? 'متوسط' : 'Avg'}</div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{t.progress.avg}</div>
           <div className="font-extrabold ltr text-emerald-600">81%</div>
         </div>
       </div>
-      <Btn kind="amber" className="w-full mt-4">📥 {isAR ? 'تحميل PDF' : 'Download PDF'}</Btn>
+      <Btn kind="amber" className="w-full mt-4">📥 {t.progress.downloadPdf}</Btn>
     </Card>
   );
 }
 
 function BadgesCard() {
-  const { isAR } = useApp();
+  const { t } = useApp();
   const badges = [
-    { icon: '🔥', ar: 'سلسلة أسبوع', en: 'Week streak',    earned: true },
-    { icon: '🧠', ar: '٥٠ سؤال',      en: '50 questions',   earned: true },
-    { icon: '🎤', ar: 'شفهي أول',     en: 'First oral',     earned: true },
-    { icon: '⚡',  ar: 'حلّ سريع',    en: 'Speed solver',   earned: false },
-    { icon: '🏆', ar: 'إتقان فصل',   en: 'Chapter mastery', earned: false },
-    { icon: '🌙', ar: 'بومة ليل',     en: 'Night owl',      earned: false }
+    { icon: '🔥', label: t.progress.badgeWeekStreak,  earned: true },
+    { icon: '🧠', label: t.progress.badgeQ50,         earned: true },
+    { icon: '🎤', label: t.progress.badgeFirstOral,   earned: true },
+    { icon: '⚡',  label: t.progress.badgeSpeed,       earned: false },
+    { icon: '🏆', label: t.progress.badgeChapter,     earned: false },
+    { icon: '🌙', label: t.progress.badgeNightOwl,    earned: false }
   ];
   return (
     <Card className="p-5">
-      <div className="font-extrabold text-slate-900 text-[15px] mb-4">{isAR ? 'شاراتك' : 'Badges'}</div>
+      <div className="font-extrabold text-slate-900 text-[15px] mb-4">{t.progress.badges}</div>
       <div className="grid grid-cols-3 gap-2">
         {badges.map((b, i) => (
           <div key={i} className={`aspect-square rounded-xl grid place-items-center text-2xl border-2
             ${b.earned ? 'bg-amber-50 border-amber-300' : 'bg-slate-50 border-slate-200 opacity-40 grayscale'}`}
-            title={isAR ? b.ar : b.en}>
+            title={b.label}>
             {b.icon}
           </div>
         ))}

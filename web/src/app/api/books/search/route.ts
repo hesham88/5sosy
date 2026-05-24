@@ -16,11 +16,22 @@ export async function POST(req: Request) {
       headers['X-API-Key'] = apiKey;
     }
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(payload),
-    });
+    // Hard timeout so the browser never hangs forever when the upstream search
+    // is slow (the in-memory cosine path can take very long). Fail fast with a
+    // clear error instead of an endless spinner.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 45_000);
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!res.ok) {
       throw new Error(`Upstream returned ${res.status}`);
@@ -29,7 +40,11 @@ export async function POST(req: Request) {
     const data = await res.json();
     return NextResponse.json(data);
   } catch (error: any) {
+    const aborted = error?.name === 'AbortError';
     console.error('[books search API]', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { error: aborted ? 'Search timed out' : error.message, results: [] },
+      { status: aborted ? 504 : 500 }
+    );
   }
 }

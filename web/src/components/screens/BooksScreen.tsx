@@ -27,6 +27,42 @@ const ACTION_META: Record<ActionKey, { glyph: string; agent: AgentName; mode: st
   questions: { glyph: '❓', agent: 'pedagogy',     mode: 'common_qs' }
 };
 
+// Parse a YouTube URL into an embeddable form. Handles single videos AND
+// playlists (the MOE "videos" are actually playlists) — a playlist embeds as
+// `videoseries?list=…` which gives in-player next/prev navigation through the
+// playlist's videos, so the modal no longer shows "Invalid video URL".
+function parseYouTube(url: string): { embedUrl: string | null; isPlaylist: boolean; videoId: string | null; listId: string | null } {
+  if (!url) return { embedUrl: null, isPlaylist: false, videoId: null, listId: null };
+  let listId = '';
+  let videoId = '';
+  try {
+    const u = new URL(url);
+    listId = u.searchParams.get('list') || '';
+    videoId = u.searchParams.get('v') || '';
+    if (!videoId) {
+      const m =
+        u.pathname.match(/\/(?:embed|v|shorts)\/([\w-]{11})/) ||
+        (u.hostname.includes('youtu.be') ? u.pathname.match(/\/([\w-]{11})/) : null);
+      if (m) videoId = m[m.length - 1];
+    }
+  } catch {
+    const lm = url.match(/[?&]list=([\w-]+)/);
+    if (lm) listId = lm[1];
+    const vm = url.match(/[?&]v=([\w-]{11})/) || url.match(/(?:youtu\.be\/|embed\/|v\/|shorts\/)([\w-]{11})/);
+    if (vm) videoId = vm[1];
+  }
+  const base = 'https://www.youtube.com/embed/';
+  const params = 'autoplay=1&rel=0';
+  if (listId) {
+    const inner = videoId.length === 11 ? videoId : 'videoseries';
+    return { embedUrl: `${base}${inner}?${params}&list=${listId}`, isPlaylist: true, videoId: videoId || null, listId };
+  }
+  if (videoId.length === 11) {
+    return { embedUrl: `${base}${videoId}?${params}`, isPlaylist: false, videoId, listId: null };
+  }
+  return { embedUrl: null, isPlaylist: false, videoId: null, listId: null };
+}
+
 export default function BooksScreen() {
   const { isAR, t, locale } = useApp();
   const { user } = useAuth();
@@ -302,16 +338,33 @@ export default function BooksScreen() {
   );
   const totalPages = useMemo(() => dbBooks.reduce((sum, b) => sum + (b.pages || 0), 0), [dbBooks]);
 
-  // Dynamic matching helper for Stage
-  const matchesStage = useCallback((bookStage?: string) => {
+  // Dynamic matching helper for Stage.
+  const matchesStage = useCallback((hay?: string) => {
     if (stageFilter === 'all') return true;
-    if (!bookStage) return false;
-    const s = bookStage.toLowerCase();
-    if (stageFilter === 'primary') return s.includes('primary') || s.includes('ابتدائي');
-    if (stageFilter === 'preparatory') return s.includes('preparatory') || s.includes('إعدادي') || s.includes('اعدادي');
-    if (stageFilter === 'secondary') return s.includes('secondary') || s.includes('ثانوي');
+    if (!hay) return false;
+    // Normalize Arabic hamza/alef/ya/ta-marbuta variants so e.g. "الإبتدائية"
+    // (hamza form) matches the "ابتدائي" stage. Use prefix-free tokens
+    // (بتدائ / عداد / ثانو) that survive ال + masculine/feminine endings.
+    const s = hay
+      .toLowerCase()
+      .replace(/[أإآ]/g, 'ا')
+      .replace(/ى/g, 'ي')
+      .replace(/ة/g, 'ه');
+    if (stageFilter === 'primary') return s.includes('primary') || s.includes('بتدائ');
+    if (stageFilter === 'preparatory') return s.includes('preparatory') || s.includes('عداد');
+    if (stageFilter === 'secondary') return s.includes('secondary') || s.includes('ثانو');
     return false;
   }, [stageFilter]);
+
+  // Stage often lives in grade/subtitle, not the (frequently empty) stage field —
+  // build a combined haystack so the stage filter still works.
+  const stageHay = useCallback(
+    (b: Book) =>
+      [b.stage, b.arStage, b.enStage, b.grade, b.arGrade, b.enGrade, b.arSub, b.enSub]
+        .filter(Boolean)
+        .join(' '),
+    []
+  );
 
   // Grades list for active filter
   const availableGrades = useMemo(() => {
@@ -379,14 +432,14 @@ export default function BooksScreen() {
         b.grade === gradeFilter ||
         b.arSub.toLowerCase().includes(gradeFilter.toLowerCase()) ||
         b.enSub.toLowerCase().includes(gradeFilter.toLowerCase());
-      const matchStage = matchesStage(b.stage);
+      const matchStage = matchesStage(stageHay(b));
       const matchType = typeFilter === 'all' || b.type === typeFilter;
       const matchLanguage = languageFilter === 'all' || b.language === languageFilter;
       const matchYear = yearFilter === 'all' || b.year === Number(yearFilter);
       const matchPublisher = publisherFilter === 'all' || b.publisher === publisherFilter;
       return matchSubject && matchGrade && matchStage && matchType && matchLanguage && matchYear && matchPublisher && bookMatchesQuery(b, catalogQuery);
     });
-  }, [activeBooks, subjectFilter, gradeFilter, matchesStage, typeFilter, languageFilter, yearFilter, publisherFilter, catalogQuery, activeTab]);
+  }, [activeBooks, subjectFilter, gradeFilter, matchesStage, stageHay, typeFilter, languageFilter, yearFilter, publisherFilter, catalogQuery, activeTab]);
 
   // Filters Videos list
   const filteredVideos = useMemo(() => {
@@ -394,7 +447,7 @@ export default function BooksScreen() {
     return dbVideos.filter((v) => {
       const matchSubject = subjectFilter === 'all' || v.subject === subjectFilter;
       const matchGrade = gradeFilter === 'all' || v.grade === gradeFilter;
-      const matchStage = matchesStage(v.stage);
+      const matchStage = matchesStage([v.stage, v.grade].filter(Boolean).join(' '));
 
       const q = catalogQuery.trim().toLowerCase();
       const matchQuery =
@@ -1345,9 +1398,7 @@ export default function BooksScreen() {
 
       {/* Premium Video Modal Iframe Player */}
       {selectedVideo && (() => {
-        const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
-        const match = selectedVideo.youtubeUrl.match(regExp);
-        const youtubeId = (match && match[2].length === 11) ? match[2] : null;
+        const { embedUrl, isPlaylist } = parseYouTube(selectedVideo.youtubeUrl);
 
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
@@ -1361,6 +1412,11 @@ export default function BooksScreen() {
                   <h3 className="text-[15px] font-extrabold text-white truncate mt-0.5">
                     {selectedVideo.title}
                   </h3>
+                  {isPlaylist && (
+                    <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-bold text-amber-300">
+                      🎞️ {isAR ? 'قائمة تشغيل — تنقّل بين الفيديوهات داخل المشغّل' : 'Playlist — use the in-player list to switch videos'}
+                    </span>
+                  )}
                 </div>
                 <button
                   onClick={() => setSelectedVideo(null)}
@@ -1371,9 +1427,9 @@ export default function BooksScreen() {
               </div>
               
               <div className="relative w-full aspect-video bg-black">
-                {youtubeId ? (
+                {embedUrl ? (
                   <iframe
-                    src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&rel=0`}
+                    src={embedUrl}
                     title={selectedVideo.title}
                     frameBorder="0"
                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -1381,8 +1437,18 @@ export default function BooksScreen() {
                     className="absolute inset-0 w-full h-full"
                   />
                 ) : (
-                  <div className="absolute inset-0 flex items-center justify-center text-slate-400">
-                    {isAR ? 'رابط الفيديو غير صالح' : 'Invalid video URL'}
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-400">
+                    <span>{isAR ? 'رابط الفيديو غير صالح' : 'Invalid video URL'}</span>
+                    {selectedVideo.youtubeUrl && (
+                      <a
+                        href={selectedVideo.youtubeUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sky-400 hover:text-sky-300 text-[13px] font-semibold"
+                      >
+                        {isAR ? 'افتح على يوتيوب ↗' : 'Open on YouTube ↗'}
+                      </a>
+                    )}
                   </div>
                 )}
               </div>
@@ -1735,22 +1801,24 @@ function BookTaskRow({ task }: { task: any }) {
 /* VideoCard component */
 function VideoCard({ video, onClick }: { video: Video; onClick: () => void }) {
   const { isAR } = useApp();
-  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
-  const match = video.youtubeUrl.match(regExp);
-  const youtubeId = (match && match[2].length === 11) ? match[2] : null;
-  const thumbnailUrl = youtubeId ? `https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg` : 'https://img.youtube.com/vi/placeholder/hqdefault.jpg';
+  const { videoId, isPlaylist } = parseYouTube(video.youtubeUrl);
+  const thumbnailUrl = videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : null;
 
   return (
     <div 
       onClick={onClick}
       className="relative group rounded-2xl border border-slate-200 bg-white overflow-hidden hover:border-sky-300 hover:shadow-md transition duration-300 flex flex-col cursor-pointer card-lift"
     >
-      <div className="relative aspect-video bg-slate-900 overflow-hidden flex items-center justify-center">
-        <img 
-          src={thumbnailUrl} 
-          alt={video.title}
-          className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
-        />
+      <div className="relative aspect-video bg-gradient-to-br from-slate-800 to-slate-950 overflow-hidden flex items-center justify-center">
+        {thumbnailUrl ? (
+          <img
+            src={thumbnailUrl}
+            alt={video.title}
+            className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
+          />
+        ) : (
+          <span className="text-4xl opacity-40">🎞️</span>
+        )}
         <div className="absolute inset-0 bg-slate-950/20 group-hover:bg-slate-950/35 transition duration-300 flex items-center justify-center">
           <div className="w-12 h-12 rounded-full bg-white/90 backdrop-blur shadow-md flex items-center justify-center text-sky-600 transform scale-90 group-hover:scale-100 transition duration-300">
             <span className="text-[16px] ms-0.5">▶</span>
@@ -1759,6 +1827,11 @@ function VideoCard({ video, onClick }: { video: Video; onClick: () => void }) {
         <div className="absolute top-2.5 start-2.5">
           <SubjectChip id={video.subject} size="sm" />
         </div>
+        {isPlaylist && (
+          <div className="absolute top-2.5 end-2.5 rounded-md bg-slate-900/80 px-2 py-0.5 text-[10px] font-bold text-white">
+            🎞️ {isAR ? 'قائمة' : 'Playlist'}
+          </div>
+        )}
       </div>
       
       <div className="p-4 flex-1 flex flex-col justify-between">

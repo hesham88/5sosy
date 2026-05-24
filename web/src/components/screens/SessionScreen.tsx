@@ -7,7 +7,7 @@ import { useApp } from '../shared/Providers';
 import { Btn, Card, SubjectChip } from '../shared/atoms';
 
 export default function SessionScreen() {
-  const { isAR, locale } = useApp();
+  const { isAR, t, locale } = useApp();
   const router = useRouter();
   const [progress] = useState(0.35);
   const [explained, setExplained] = useState<Record<string, boolean>>({});
@@ -50,7 +50,7 @@ export default function SessionScreen() {
             </div>
             <div className="text-[10.5px] text-slate-400 mt-0.5 ltr text-end">{Math.round(progress * 100)}%</div>
           </div>
-          <Btn kind="outline" size="sm">⏸ {isAR ? 'إيقاف' : 'Pause'}</Btn>
+          <Btn kind="outline" size="sm">⏸ {t.session.pause}</Btn>
         </div>
       </div>
 
@@ -58,10 +58,10 @@ export default function SessionScreen() {
         <div className="lg:col-span-8 min-w-0">
           <div className="mb-4 flex items-center gap-2">
             <span className="text-[11px] font-bold text-sky-700 bg-sky-50 px-2 py-1 rounded">
-              {isAR ? 'درس مولّد بالذكاء' : 'Smart lesson'}
+              {t.session.smartLesson}
             </span>
             <span className="text-[11px] text-slate-400">·</span>
-            <span className="text-[11px] text-slate-500 ltr">~12 min read · adjusted to your level</span>
+            <span className="text-[11px] text-slate-500">{t.session.readMeta}</span>
           </div>
 
           <h1 className="text-3xl lg:text-4xl font-extrabold text-slate-900 mb-3 leading-tight">
@@ -87,28 +87,28 @@ export default function SessionScreen() {
           </div>
 
           <h2 className="text-xl font-extrabold text-slate-900 mt-8 mb-3">
-            {isAR ? 'الصيغة الرياضية' : 'The mathematical form'}
+            {t.session.mathForm}
           </h2>
 
           <div className="bg-gradient-to-br from-sky-50 to-white border border-sky-200 rounded-xl p-6 my-4">
             <div className="text-[11.5px] font-bold uppercase tracking-wider text-sky-700 mb-3">
-              {isAR ? 'قانون بويل' : "Boyle's law"}
+              {t.session.boylesLaw}
             </div>
             <div className="eq text-3xl text-slate-900 ltr">
               P<sub>1</sub> · V<sub>1</sub>  =  P<sub>2</sub> · V<sub>2</sub>
             </div>
             <div className="mt-4 grid sm:grid-cols-2 gap-3 text-[13px]">
-              <div className="flex gap-2"><span className="eq ltr text-sky-600">P</span><span className="text-slate-600">{isAR ? 'الضغط' : 'Pressure (atm, Pa)'}</span></div>
-              <div className="flex gap-2"><span className="eq ltr text-sky-600">V</span><span className="text-slate-600">{isAR ? 'الحجم' : 'Volume (L, m³)'}</span></div>
-              <div className="flex gap-2"><span className="text-slate-400">∝</span><span className="text-slate-600">{isAR ? 'علاقة عكسية' : 'inverse proportion'}</span></div>
-              <div className="flex gap-2"><span className="text-slate-400">T</span><span className="text-slate-600">{isAR ? 'الحرارة ثابتة' : 'temperature held constant'}</span></div>
+              <div className="flex gap-2"><span className="eq ltr text-sky-600">P</span><span className="text-slate-600">{t.session.pressure}</span></div>
+              <div className="flex gap-2"><span className="eq ltr text-sky-600">V</span><span className="text-slate-600">{t.session.volume}</span></div>
+              <div className="flex gap-2"><span className="text-slate-400">∝</span><span className="text-slate-600">{t.session.inverseProp}</span></div>
+              <div className="flex gap-2"><span className="text-slate-400">T</span><span className="text-slate-600">{t.session.tempConstant}</span></div>
             </div>
           </div>
 
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex gap-3">
             <div className="text-2xl shrink-0">💡</div>
             <div className="text-[13.5px] text-amber-900">
-              <div className="font-bold mb-1">{isAR ? 'فخ شائع' : 'Common pitfall'}</div>
+              <div className="font-bold mb-1">{t.session.commonPitfall}</div>
               {isAR
                 ? 'لما تستخرج T من PV=nRT لازم تستخدم كلفن (K) مش سيليزيوس. ده اللي وقعت فيه آخر اختبار.'
                 : 'When you isolate T from PV=nRT, you must use Kelvin (K), not Celsius. This is exactly where you slipped last test.'}
@@ -118,11 +118,11 @@ export default function SessionScreen() {
           <div className="mt-8 bg-slate-900 rounded-2xl p-6 flex items-center gap-4 text-white">
             <div className="w-14 h-14 rounded-2xl bg-sky-500/20 grid place-items-center text-3xl">🧠</div>
             <div className="flex-1">
-              <div className="font-extrabold text-[17px]">{isAR ? 'جاهز لاختبار سريع؟' : 'Ready for a quick check?'}</div>
-              <div className="text-slate-300 text-[13px]">{isAR ? '٣ أسئلة، أقل من دقيقتين' : '3 questions, under 2 minutes'}</div>
+              <div className="font-extrabold text-[17px]">{t.session.readyCheck}</div>
+              <div className="text-slate-300 text-[13px]">{t.session.readyCheckSub}</div>
             </div>
             <Btn kind="primary" size="lg" onClick={() => router.push(`/${locale}/quiz`)}>
-              {isAR ? 'يلا نختبر' : 'Take the check'} <span className="ltr">→</span>
+              {t.session.takeCheck} <span className="ltr">→</span>
             </Btn>
           </div>
         </div>
@@ -140,7 +140,7 @@ export default function SessionScreen() {
 function Paragraph({ id, ar, en, egAr, egEn, explained, onToggle }: {
   id: string; ar: string; en: string; egAr: string; egEn: string; explained: boolean; onToggle: () => void;
 }) {
-  const { isAR } = useApp();
+  const { isAR, t } = useApp();
   const body = explained ? (isAR ? egAr : egEn) : (isAR ? ar : en);
   return (
     <div id={id} className="relative group mb-4">
@@ -151,7 +151,7 @@ function Paragraph({ id, ar, en, egAr, egEn, explained, onToggle }: {
         className={`mt-2 inline-flex items-center gap-1.5 text-[11px] font-bold rounded-full px-2.5 py-1 transition
           ${explained ? 'bg-amber-500 text-white' : 'bg-white text-amber-700 border border-amber-300 hover:bg-amber-50'}`}>
         <span>🇪🇬</span>
-        <span>{explained ? (isAR ? 'رجّع الفصحى' : 'Show formal') : (isAR ? 'افهمها بالمصري' : 'Explain in Egyptian')}</span>
+        <span>{explained ? t.session.showFormal : t.session.explainEg}</span>
       </button>
     </div>
   );
@@ -190,12 +190,12 @@ function FigurePlaceholder({ ar, en }: { ar: string; en: string }) {
 }
 
 function AudioSummary() {
-  const { isAR } = useApp();
+  const { t } = useApp();
   const [playing, setPlaying] = useState(false);
   return (
     <Card className="overflow-hidden">
       <div className="px-4 pt-4 pb-3 flex items-center gap-2">
-        <span className="font-extrabold text-slate-900 text-[14px]">🎧 {isAR ? 'ملخص صوتي' : 'Audio summary'}</span>
+        <span className="font-extrabold text-slate-900 text-[14px]">🎧 {t.session.audioSummary}</span>
         <span className="ms-auto text-[10.5px] text-slate-400 ltr">2:18</span>
       </div>
       <div className="bg-slate-900 p-4 flex items-center gap-3">
@@ -218,7 +218,7 @@ function AudioSummary() {
       <div className="px-4 py-3 text-[11.5px] text-slate-500 flex items-center gap-2">
         <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-bold ltr">EG-AR voice</span>
         <span>·</span>
-        <span>{isAR ? 'مولّد ٢٠٢٦' : 'Generated 2026'}</span>
+        <span>{t.session.generated2026}</span>
       </div>
     </Card>
   );
@@ -227,13 +227,13 @@ function AudioSummary() {
 function AskChat({ msgs, input, setInput, send }: {
   msgs: { who: string; ar: string; en: string }[]; input: string; setInput: (v: string) => void; send: () => void;
 }) {
-  const { isAR } = useApp();
+  const { isAR, t } = useApp();
   return (
     <Card>
       <div className="px-4 pt-4 pb-3 flex items-center gap-2">
-        <span className="font-extrabold text-slate-900 text-[14px]">💬 {isAR ? 'اسأل خصوصي' : 'Ask 5sosy'}</span>
+        <span className="font-extrabold text-slate-900 text-[14px]">💬 {t.home.askBot}</span>
         <span className="ms-auto inline-flex items-center gap-1 text-[10.5px] font-semibold text-emerald-600">
-          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />{isAR ? 'متصل' : 'live'}
+          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />{t.session.live}
         </span>
       </div>
       <div className="px-4 pb-3 space-y-2 max-h-[180px] overflow-y-auto slim">
@@ -250,7 +250,7 @@ function AskChat({ msgs, input, setInput, send }: {
       </div>
       <div className="px-3 pb-3 flex gap-2">
         <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && send()}
-          placeholder={isAR ? 'اسأل أي حاجة...' : 'Ask anything…'}
+          placeholder={t.session.askPlaceholder}
           className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-[13px] focus:outline-none focus:border-sky-400" />
         <button onClick={send} className="w-9 h-9 rounded-lg bg-sky-600 hover:bg-sky-700 text-white grid place-items-center">
           <span className="ltr text-[14px]">↑</span>
@@ -261,7 +261,7 @@ function AskChat({ msgs, input, setInput, send }: {
 }
 
 function KeyConceptsCard() {
-  const { isAR } = useApp();
+  const { isAR, t } = useApp();
   const items = [
     { ar: 'العلاقة العكسية بين P و V', en: 'Inverse P–V relationship', mastery: .82 },
     { ar: 'صياغة P₁V₁ = P₂V₂',         en: 'Form P₁V₁ = P₂V₂',         mastery: .91 },
@@ -271,7 +271,7 @@ function KeyConceptsCard() {
   return (
     <Card className="p-4">
       <div className="font-extrabold text-slate-900 text-[14px] mb-3 flex items-center gap-2">
-        🧩 {isAR ? 'مفاهيم الدرس' : 'Key concepts'}
+        🧩 {t.session.keyConcepts}
       </div>
       <div className="space-y-2.5">
         {items.map((it, i) => (

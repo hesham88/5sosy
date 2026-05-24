@@ -50,21 +50,51 @@ async def search_library(query: str, limit: int = 5) -> dict:
         query_emb = list(embs[0].values)
         
         results = []
-        # Fetch page records
-        docs = list(mongo_db["book_pages"].find({}))
+        # Fetch page records (excluding the text field to save memory)
+        docs = list(mongo_db["book_pages"].find({}, {"text": 0}))
         for data in docs:
-            text = data.get("text", "")
             # Check embedding
             emb_list = data.get("embedding")
             score = 0.0
             if emb_list and len(emb_list) == len(query_emb):
                 score = cosine_similarity(query_emb, emb_list)
-            else:
-                # regex text search fallback if embedding is missing or doesn't match dimensions
-                if query.lower() in text.lower():
-                    score = 0.5  # middle score for keyword match fallback
             
             if score > 0.15:
+                results.append({
+                    "bookId": data.get("bookId"),
+                    "bookTitle": data.get("bookTitle", "Unknown Book"),
+                    "pageNumber": data.get("pageNumber"),
+                    "grade": data.get("grade", ""),
+                    "subject": data.get("subject", ""),
+                    "language": data.get("language", "ar"),
+                    "year": data.get("year", 2026),
+                    "score": round(score, 4)
+                })
+        
+        results.sort(key=lambda x: x["score"], reverse=True)
+        top_matches = results[:limit]
+
+        # Fetch text field on-demand only for the top matches
+        for res in top_matches:
+            res["text"] = ""
+            doc = mongo_db["book_pages"].find_one({"bookId": res["bookId"], "pageNumber": res["pageNumber"]}, {"text": 1})
+            if doc:
+                text = doc.get("text", "")
+                res["text"] = text[:500] + "..." if len(text) > 500 else text
+        
+        return {"status": "success", "results": top_matches}
+        
+    except Exception as exc:
+        # Fall back to direct MongoDB regex search to avoid OOM
+        try:
+            _, mongo_db = get_mongodb_client()
+            docs = list(mongo_db["book_pages"].find(
+                {"text": {"$regex": query, "$options": "i"}},
+                {"text": 1, "bookId": 1, "bookTitle": 1, "pageNumber": 1, "grade": 1, "subject": 1, "language": 1, "year": 1}
+            ).limit(limit))
+            results = []
+            for data in docs:
+                text = data.get("text", "")
                 results.append({
                     "bookId": data.get("bookId"),
                     "bookTitle": data.get("bookTitle", "Unknown Book"),
@@ -74,34 +104,8 @@ async def search_library(query: str, limit: int = 5) -> dict:
                     "subject": data.get("subject", ""),
                     "language": data.get("language", "ar"),
                     "year": data.get("year", 2026),
-                    "score": round(score, 4)
+                    "score": 0.5
                 })
-        
-        results.sort(key=lambda x: x["score"], reverse=True)
-        results = results[:limit]
-        return {"status": "success", "results": results}
-        
-    except Exception as exc:
-        # Fall back to pure text regex/substring search on MongoDB if anything goes wrong (e.g. Gemini key missing or DB connection)
-        try:
-            _, mongo_db = get_mongodb_client()
-            docs = list(mongo_db["book_pages"].find({}))
-            results = []
-            for data in docs:
-                text = data.get("text", "")
-                if query.lower() in text.lower():
-                    results.append({
-                        "bookId": data.get("bookId"),
-                        "bookTitle": data.get("bookTitle", "Unknown Book"),
-                        "pageNumber": data.get("pageNumber"),
-                        "text": text[:500] + "..." if len(text) > 500 else text,
-                        "grade": data.get("grade", ""),
-                        "subject": data.get("subject", ""),
-                        "language": data.get("language", "ar"),
-                        "year": data.get("year", 2026),
-                        "score": 0.5
-                    })
-            results = results[:limit]
             return {"status": "success", "results": results}
         except Exception as inner_exc:
             return {"status": "error", "error_message": f"Search failed: {inner_exc} (Embedding err: {exc})"}

@@ -169,7 +169,7 @@ export default function OnboardingScreen() {
         if (result.session_id) sessionIdRef.current = result.session_id;
         const step = result.next_step;
         if (!step) {
-          setError(isAR ? 'حصل خلل في الاتصال — حاول تاني.' : 'Connection hiccup — please retry.');
+          setError(t.onboarding.connectionError);
           setPending(false);
           return;
         }
@@ -192,7 +192,7 @@ export default function OnboardingScreen() {
     },
     // persistAndExit captured below; intentionally not in deps (stable via ref usage)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [collected, locale, username, isAR]
+    [collected, locale, username, t]
   );
 
   const persistAndExit = useCallback(
@@ -306,10 +306,10 @@ export default function OnboardingScreen() {
           {messages.map((m) => (
             <Bubble key={m.id} role={m.role} text={m.text} isAR={isAR} />
           ))}
-          {pending && !finishing && <PendingIndicator isAR={isAR} />}
+          {pending && !finishing && <PendingIndicator label={t.onboarding.thinking} />}
           {finishing && (
             <div className="text-center text-[13px] text-slate-500 py-6">
-              {isAR ? 'بنحفظ بياناتك ونجهز الصفحة الرئيسية…' : 'Saving your profile and prepping home…'}
+              {t.onboarding.saving}
             </div>
           )}
           {error && (
@@ -327,7 +327,6 @@ export default function OnboardingScreen() {
                 sendTurn(answerText, answerValue, currentStep.key)
               }
               locale={locale}
-              isAR={isAR}
               busy={pending}
             />
           </div>
@@ -337,13 +336,13 @@ export default function OnboardingScreen() {
   );
 }
 
-function PendingIndicator({ isAR }: { isAR: boolean }) {
+function PendingIndicator({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-2 text-slate-400 text-[13px] px-1">
       <span className="inline-block w-1.5 h-1.5 rounded-full bg-slate-400 animate-pulse" />
       <span className="inline-block w-1.5 h-1.5 rounded-full bg-slate-400 animate-pulse [animation-delay:120ms]" />
       <span className="inline-block w-1.5 h-1.5 rounded-full bg-slate-400 animate-pulse [animation-delay:240ms]" />
-      <span className="ms-1">{isAR ? 'بيفكر…' : 'thinking…'}</span>
+      <span className="ms-1">{label}</span>
     </div>
   );
 }
@@ -367,36 +366,34 @@ function AnswerWidget({
   step,
   onAnswer,
   locale,
-  isAR,
   busy
 }: {
   step: NextStepQuestion;
   onAnswer: (text: string, value: unknown) => void;
   locale: string;
-  isAR: boolean;
   busy: boolean;
 }) {
+  const { t } = useApp();
   switch (step.input_type) {
     case 'text':
-      return <TextInput onSubmit={(v) => onAnswer(v, v)} placeholder={isAR ? 'اكتب إجابتك' : 'Type your answer'} disabled={busy} />;
+      return <TextInput onSubmit={(v) => onAnswer(v, v)} placeholder={t.onboarding.typeAnswer} disabled={busy} />;
     case 'number':
-      return <NumberInput onSubmit={(v) => onAnswer(String(v), v)} placeholder={isAR ? 'رقم' : 'Number'} disabled={busy} />;
+      return <NumberInput onSubmit={(v) => onAnswer(String(v), v)} placeholder={t.onboarding.number} disabled={busy} />;
     case 'choice':
       return (
         <ChoiceRow
           options={step.options ?? []}
           locale={locale}
-          onPick={(opt) => onAnswer(optionLabel(opt, isAR), opt.id)}
+          onPick={(opt) => onAnswer(optionLabel(opt, locale === 'ar'), opt.id)}
           disabled={busy}
         />
       );
     case 'avatar':
       return (
         <AvatarPicker
-          isAR={isAR}
           onPick={(style, seed) =>
             onAnswer(
-              isAR ? 'اخترت شكلي ✨' : 'Picked an avatar ✨',
+              t.onboarding.pickedAvatar,
               { avatarStyle: style, avatarSeed: seed }
             )
           }
@@ -503,14 +500,13 @@ function ChoiceRow({
 }
 
 function AvatarPicker({
-  isAR,
   onPick,
   disabled
 }: {
-  isAR: boolean;
   onPick: (style: AvatarStyle, seed: string) => void;
   disabled: boolean;
 }) {
+  const { t } = useApp();
   const [activeStyle, setActiveStyle] = useState<AvatarStyle>(AVATAR_STYLES[0]);
   const [seeds, setSeeds] = useState<string[]>(AVATAR_SEED_PALETTE);
 
@@ -535,7 +531,7 @@ function AvatarPicker({
           disabled={disabled}
           className="text-[12px] font-semibold px-3 py-1.5 rounded-lg border-2 border-amber-300 bg-amber-50 text-amber-700 hover:border-amber-400 transition disabled:opacity-50"
         >
-          {isAR ? '🎲 جدد' : '🎲 Shuffle'}
+          🎲 {t.onboarding.shuffle}
         </button>
       </div>
       <div className="grid grid-cols-4 sm:grid-cols-6 gap-2.5">

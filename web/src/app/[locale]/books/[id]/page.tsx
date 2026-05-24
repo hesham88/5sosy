@@ -138,13 +138,11 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
       const res = await fetch('/api/books/search', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ query: searchQuery, limit: 10, mode: searchMode })
+        body: JSON.stringify({ query: searchQuery, limit: 10, mode: searchMode, bookId: id })
       });
       if (res.ok) {
         const data = await res.json();
-        // Filter results only belonging to this book
-        const bookMatches = (data.results || []).filter((r: any) => r.bookId === id);
-        setSearchResults(bookMatches);
+        setSearchResults(data.results || []);
       }
     } catch (err) {
       console.error('Local search error:', err);

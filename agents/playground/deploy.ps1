@@ -70,7 +70,7 @@ gcloud run deploy $Service `
   --allow-unauthenticated `
   --quiet `
   --port 8080 `
-  --memory 1Gi `
+  --memory 2Gi `
   --cpu 1 `
   --no-cpu-throttling `
   --max-instances 3 `

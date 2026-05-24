@@ -64,7 +64,27 @@ ALLOWED_ORIGINS = [
     if o.strip()
 ]
 
-app = FastAPI(title="5sosybot agents", version="0.1.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Load pages cache asynchronously on startup
+    asyncio.create_task(load_pages_cache())
+
+    async def check_and_start_monitor():
+        try:
+            status_ref = db.collection("ingestion").document("status")
+            status_doc = await asyncio.get_running_loop().run_in_executor(None, status_ref.get)
+            status_data = status_doc.to_dict() or {}  # type: ignore
+            if status_data.get("status") == "running":
+                exec_name = status_data.get("executionName", "")
+                print(f"Detected running ingestion sync on startup. Restarting monitor for execution: {exec_name}")
+                asyncio.create_task(_monitor_sync_execution(exec_name))
+        except Exception as e:
+            print(f"Error starting execution monitor on startup: {e}")
+
+    asyncio.create_task(check_and_start_monitor())
+    yield
+
+app = FastAPI(title="5sosybot agents", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -1227,20 +1247,22 @@ async def load_pages_cache():
     async with _cache_lock:
         provider = os.getenv("DATABASE_PROVIDER", "firestore").lower()
         if provider == "mongodb":
-            print("Loading pages cache from MongoDB collection 'book_pages'...")
+            print("Loading pages cache from MongoDB collection 'book_pages' (excluding text)...")
             try:
+                import array
                 from shared.mongodb_client import get_mongodb_client
                 _, mongo_db = get_mongodb_client()
                 loop = asyncio.get_running_loop()
-                docs = await loop.run_in_executor(None, lambda: list(mongo_db["book_pages"].find({})))
+                # Project out the 'text' field to keep memory footprint minimal
+                docs = await loop.run_in_executor(None, lambda: list(mongo_db["book_pages"].find({}, {"text": 0})))
                 new_cache = []
                 for data in docs:
-                    emb_list = list(data["embedding"]) if ("embedding" in data and data["embedding"]) else None
+                    emb_list = array.array('f', data["embedding"]) if ("embedding" in data and data["embedding"]) else None
                     new_cache.append({
                         "bookId": data.get("bookId"),
                         "bookTitle": data.get("bookTitle", "Unknown Book"),
                         "pageNumber": data.get("pageNumber"),
-                        "text": data.get("text", ""),
+                        "text": "", # Kept empty in cache, fetched on-demand
                         "embedding": emb_list,
                         "grade": data.get("grade", ""),
                         "subject": data.get("subject", ""),
@@ -1250,16 +1272,18 @@ async def load_pages_cache():
                 _pages_cache = new_cache
                 _cache_loaded = True
                 _last_cache_load_time = time.time()
-                print(f"Pages cache loaded from MongoDB. Total pages: {len(_pages_cache)}")
+                print(f"Pages cache loaded from MongoDB (projected with array). Total pages: {len(_pages_cache)}")
             except Exception as e:
                 print(f"Error loading pages cache from MongoDB: {e}")
             return
 
-        print("Loading pages cache from Firestore collection group 'pages'...")
+        print("Loading pages cache from Firestore collection group 'pages' (excluding text)...")
         try:
+            import array
             pages_ref = db.collection_group("pages")
+            # Select only needed fields to exclude 'text' and keep memory minimal
             docs = await asyncio.get_running_loop().run_in_executor(
-                None, lambda: list(pages_ref.stream())
+                None, lambda: list(pages_ref.select(["bookId", "bookTitle", "pageNumber", "embedding", "grade", "subject", "language", "year"]).stream())
             )
             new_cache = []
             for doc in docs:
@@ -1270,14 +1294,14 @@ async def load_pages_cache():
                     if isinstance(emb_val, bytes):
                         import struct
                         num_floats = len(emb_val) // 4
-                        emb_list = list(struct.unpack(f"{num_floats}f", emb_val))
+                        emb_list = array.array('f', struct.unpack(f"{num_floats}f", emb_val))
                     else:
-                        emb_list = list(emb_val)
+                        emb_list = array.array('f', emb_val)
                 new_cache.append({
                     "bookId": data.get("bookId"),
                     "bookTitle": data.get("bookTitle", "Unknown Book"),
                     "pageNumber": data.get("pageNumber"),
-                    "text": data.get("text", ""),
+                    "text": "", # Kept empty in cache, fetched on-demand
                     "embedding": emb_list,
                     "grade": data.get("grade", ""),
                     "subject": data.get("subject", ""),
@@ -1288,35 +1312,17 @@ async def load_pages_cache():
             _cache_loaded = True
 
             _last_cache_load_time = time.time()
-            print(f"Pages cache loaded. Total pages: {len(_pages_cache)}")
+            print(f"Pages cache loaded from Firestore (projected). Total pages: {len(_pages_cache)}")
         except Exception as e:
             print(f"Error loading pages cache: {e}")
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    asyncio.create_task(load_pages_cache())
-
-    async def check_and_start_monitor():
-        try:
-            status_ref = db.collection("ingestion").document("status")
-            status_doc = await asyncio.get_running_loop().run_in_executor(None, status_ref.get)
-            status_data = status_doc.to_dict() or {}  # type: ignore
-            if status_data.get("status") == "running":
-                exec_name = status_data.get("executionName", "")
-                print(f"Detected running ingestion sync on startup. Restarting monitor for execution: {exec_name}")
-                asyncio.create_task(_monitor_sync_execution(exec_name))
-        except Exception as e:
-            print(f"Error starting execution monitor on startup: {e}")
-
-    asyncio.create_task(check_and_start_monitor())
-    yield
-
-app.router.lifespan_context = lifespan
+# Lifespan was moved to the top and registered with FastAPI instantiation
 
 class SearchRequest(BaseModel):
     query: str
     limit: int = 10
     mode: str = "semantic"
+    bookId: str | None = None
 
 def dot_product(v1, v2):
     return sum(x * y for x, y in zip(v1, v2))
@@ -1335,28 +1341,81 @@ def cosine_similarity(v1, v2):
 async def books_search(req: SearchRequest, x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> dict:
     _require_api_key(x_api_key)
     global _pages_cache, _cache_loaded, _last_cache_load_time
-    if not _cache_loaded or not _pages_cache or (time.time() - _last_cache_load_time > 180):
-        await load_pages_cache()
     if not req.query.strip():
         return {"results": []}
 
+    provider = os.getenv("DATABASE_PROVIDER", "firestore").lower()
     results = []
 
     if req.mode == "exact":
-        for item in _pages_cache:
-            if req.query.lower() in item["text"].lower():
-                results.append({
-                    "bookId": item["bookId"],
-                    "bookTitle": item["bookTitle"],
-                    "pageNumber": item["pageNumber"],
-                    "text": item["text"][:300] + "..." if len(item["text"]) > 300 else item["text"],
-                    "grade": item["grade"],
-                    "subject": item["subject"],
-                    "language": item["language"],
-                    "year": item["year"],
-                    "score": 1.0
-                })
+        # Direct DB queries for exact search to prevent OOM
+        if provider == "mongodb":
+            try:
+                from shared.mongodb_client import get_mongodb_client
+                _, mongo_db = get_mongodb_client()
+                loop = asyncio.get_running_loop()
+                # Run case-insensitive regex search directly in MongoDB, with optional bookId filter
+                query_filter = {"text": {"$regex": req.query, "$options": "i"}}
+                if req.bookId:
+                    query_filter["bookId"] = req.bookId
+
+                docs = await loop.run_in_executor(
+                    None,
+                    lambda: list(mongo_db["book_pages"].find(
+                        query_filter,
+                        {"text": 1, "bookId": 1, "bookTitle": 1, "pageNumber": 1, "grade": 1, "subject": 1, "language": 1, "year": 1}
+                    ).limit(req.limit))
+                )
+                for data in docs:
+                    text = data.get("text", "")
+                    results.append({
+                        "bookId": data.get("bookId"),
+                        "bookTitle": data.get("bookTitle", "Unknown Book"),
+                        "pageNumber": data.get("pageNumber"),
+                        "text": text[:300] + "..." if len(text) > 300 else text,
+                        "grade": data.get("grade", ""),
+                        "subject": data.get("subject", ""),
+                        "language": data.get("language", "ar"),
+                        "year": data.get("year", 2026),
+                        "score": 1.0
+                    })
+            except Exception as e:
+                print(f"MongoDB exact search failed: {e}")
+        else:
+            # Firestore group stream fallback for exact search
+            try:
+                pages_ref = db.collection_group("pages")
+                docs = await asyncio.get_running_loop().run_in_executor(
+                    None, lambda: list(pages_ref.stream())
+                )
+                count = 0
+                for doc in docs:
+                    data = doc.to_dict() or {}
+                    if req.bookId and data.get("bookId") != req.bookId:
+                        continue
+                    text = data.get("text", "")
+                    if req.query.lower() in text.lower():
+                        results.append({
+                            "bookId": data.get("bookId"),
+                            "bookTitle": data.get("bookTitle", "Unknown Book"),
+                            "pageNumber": data.get("pageNumber"),
+                            "text": text[:300] + "..." if len(text) > 300 else text,
+                            "grade": data.get("grade", ""),
+                            "subject": data.get("subject", ""),
+                            "language": data.get("language", "ar"),
+                            "year": data.get("year", 2026),
+                            "score": 1.0
+                        })
+                        count += 1
+                        if count >= req.limit:
+                            break
+            except Exception as e:
+                print(f"Firestore exact search failed: {e}")
     else:
+        # Semantic search — embed the query, then prefer Atlas $vectorSearch
+        # (indexed, fast). Only fall back to the in-memory cosine cache if the
+        # vector index is missing/erroring, since that path scans every page
+        # and is what made search hang.
         try:
             client = genai.Client()
             response = await client.aio.models.embed_content(
@@ -1370,25 +1429,111 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to generate query embedding: {e}")
 
+        top_matches = []
+        used_vector_search = False
+
+        if provider == "mongodb":
+            try:
+                from shared.mongodb_client import get_mongodb_client
+                _, mongo_db = get_mongodb_client()
+                vs: dict = {
+                    "index": os.getenv("MONGO_VECTOR_INDEX", "vector_index"),
+                    "path": "embedding",
+                    "queryVector": query_emb,
+                    "numCandidates": max(150, req.limit * 20),
+                    "limit": req.limit,
+                }
+                if req.bookId:
+                    vs["filter"] = {"bookId": req.bookId}
+                pipeline = [
+                    {"$vectorSearch": vs},
+                    {"$project": {
+                        "_id": 0, "text": 1, "bookId": 1, "bookTitle": 1, "pageNumber": 1,
+                        "grade": 1, "subject": 1, "language": 1, "year": 1,
+                        "score": {"$meta": "vectorSearchScore"},
+                    }},
+                ]
+                docs = await asyncio.get_running_loop().run_in_executor(
+                    None, lambda: list(mongo_db["book_pages"].aggregate(pipeline))
+                )
+                for data in docs:
+                    text = data.get("text", "")
+                    top_matches.append({
+                        "bookId": data.get("bookId"),
+                        "bookTitle": data.get("bookTitle", "Unknown Book"),
+                        "pageNumber": data.get("pageNumber"),
+                        "text": text[:300] + "..." if len(text) > 300 else text,
+                        "grade": data.get("grade", ""),
+                        "subject": data.get("subject", ""),
+                        "language": data.get("language", "ar"),
+                        "year": data.get("year", 2026),
+                        "score": round(float(data.get("score", 0)), 4),
+                    })
+                used_vector_search = True
+            except Exception as e:
+                print(f"$vectorSearch unavailable, falling back to in-memory cosine: {e}")
+
+        if used_vector_search:
+            return {"results": top_matches, "engine": "vectorSearch"}
+
+        # ---- Fallback: in-memory cosine over the page cache ----
+        if not _cache_loaded or not _pages_cache or (time.time() - _last_cache_load_time > 3600):
+            await load_pages_cache()
+
+        candidate_results = []
         for item in _pages_cache:
+            if req.bookId and item["bookId"] != req.bookId:
+                continue
             if not item["embedding"]:
                 continue
             score = cosine_similarity(query_emb, item["embedding"])
             if score > 0.15:
-                results.append({
+                candidate_results.append({
                     "bookId": item["bookId"],
                     "bookTitle": item["bookTitle"],
                     "pageNumber": item["pageNumber"],
-                    "text": item["text"][:300] + "..." if len(item["text"]) > 300 else item["text"],
                     "grade": item["grade"],
                     "subject": item["subject"],
                     "language": item["language"],
                     "year": item["year"],
                     "score": round(score, 4)
                 })
-        results.sort(key=lambda x: x["score"], reverse=True)
 
-    results = results[:req.limit]
+        candidate_results.sort(key=lambda x: x["score"], reverse=True)
+        top_matches = candidate_results[:req.limit]
+
+        # Fetch the full text for ONLY the top matches on-demand to save memory
+        for match in top_matches:
+            match["text"] = ""
+            if provider == "mongodb":
+                try:
+                    from shared.mongodb_client import get_mongodb_client
+                    _, mongo_db = get_mongodb_client()
+                    doc = await asyncio.get_running_loop().run_in_executor(
+                        None,
+                        lambda: mongo_db["book_pages"].find_one(
+                            {"bookId": match["bookId"], "pageNumber": match["pageNumber"]},
+                            {"text": 1}
+                        )
+                    )
+                    if doc:
+                        text = doc.get("text", "")
+                        match["text"] = text[:300] + "..." if len(text) > 300 else text
+                except Exception as e:
+                    print(f"Failed to fetch page text from MongoDB: {e}")
+            else:
+                # Firestore on-demand text fetch
+                try:
+                    page_doc = db.collection("books").document(match["bookId"]).collection("pages").document(str(match["pageNumber"]))
+                    doc = await asyncio.get_running_loop().run_in_executor(None, page_doc.get)
+                    if doc.exists:
+                        text = (doc.to_dict() or {}).get("text", "")
+                        match["text"] = text[:300] + "..." if len(text) > 300 else text
+                except Exception as e:
+                    print(f"Failed to fetch page text from Firestore: {e}")
+
+        results = top_matches
+
     return {"results": results}
 
 class ParseBookRequest(BaseModel):
