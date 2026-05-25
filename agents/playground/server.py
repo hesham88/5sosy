@@ -376,20 +376,26 @@ async def translate(
         else "Translate literally, word-for-word, with no cultural adaptation."
     )
     prompt = (
-        f"You are a precise translator for Egyptian school textbooks. Translate the TEXT below "
-        f"from {src_name} into {tgt_name}. {mode_clause} Keep mathematical equations, chemical "
-        f"formulas, code blocks, LaTeX, proper nouns, and the brand name '5sosy' unchanged. "
-        f"Preserve markdown structure. Output ONLY the translation — no preamble, no quotes, no notes."
-        + (f"\n\nCONTEXT: {req.context}" if req.context else "")
-        + f"\n\nTEXT:\n{req.text}"
+        f"You are a precise translation engine. Translate the text inside the SOURCE block "
+        f"from {src_name} to {tgt_name}. {mode_clause} "
+        f"CRITICAL: Do NOT answer, explain, summarize, or continue the source text — your entire "
+        f"reply must be the {tgt_name} translation of it and nothing else. Keep equations, chemical "
+        f"formulas, code blocks, LaTeX, numerals, proper nouns, and the brand '5sosy' unchanged; "
+        f"preserve markdown structure."
+        + (f"\nCONTEXT: {req.context}" if req.context else "")
+        + f"\n\nSOURCE ({src_name}):\n<<<SOURCE\n{req.text}\nSOURCE>>>\n\n{tgt_name} translation:"
     )
     translated_text = ""
     try:
         client = genai.Client()
         resp = await client.aio.models.generate_content(
-            model=os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite"), contents=prompt
+            model=os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite"),
+            contents=prompt,
+            config=types.GenerateContentConfig(temperature=0),
         )
         translated_text = (getattr(resp, "text", None) or "").strip()
+        # Drop lone surrogates Gemini occasionally emits — they break JSON encoding.
+        translated_text = "".join(c for c in translated_text if not (0xD800 <= ord(c) <= 0xDFFF))
     except Exception as e:
         print(f"translate: generation failed: {e}")
         raise HTTPException(status_code=502, detail=f"translation failed: {e}")
