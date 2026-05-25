@@ -80,6 +80,8 @@ export default function BooksScreen() {
   const [yearFilter, setYearFilter] = useState<string | 'all'>('all');
   const [publisherFilter, setPublisherFilter] = useState<string | 'all'>('all');
   const [catalogQuery, setCatalogQuery] = useState('');
+  const PAGE_SIZE = 60;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   const [chatInput, setChatInput] = useState('');
   const [chatMsgs, setChatMsgs] = useState<{ who: 'me' | '5sosy'; ar: string; en: string }[]>([]);
@@ -324,6 +326,11 @@ export default function BooksScreen() {
     : '';
 
   useEffect(() => { if (subjectFromUrl) setSubjectFilter(subjectFromUrl); }, [subjectFromUrl]);
+
+  // Reset the render window to the first page whenever the result set changes.
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [activeTab, subjectFilter, gradeFilter, stageFilter, typeFilter, languageFilter, yearFilter, publisherFilter, catalogQuery]);
 
   // Separate official and added books
   const officialBooks = useMemo(() => dbBooks.filter(b => b.type !== 'Added Book'), [dbBooks]);
@@ -1066,9 +1073,22 @@ export default function BooksScreen() {
               <InsightsVisualizer isAR={isAR} />
             ) : activeTab === 'videos' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
-                {filteredVideos.map((v) => (
+                {filteredVideos.slice(0, visibleCount).map((v) => (
                   <VideoCard key={v.id} video={v} onClick={() => setSelectedVideo(v)} />
                 ))}
+
+                {filteredVideos.length > visibleCount && (
+                  <div className="w-full col-span-full flex justify-center pt-2">
+                    <button
+                      onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+                      className="px-6 py-2.5 rounded-full bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition shadow-sm"
+                    >
+                      {isAR
+                        ? `عرض المزيد (${filteredVideos.length - visibleCount} متبقٍ)`
+                        : `Load more (${filteredVideos.length - visibleCount} more)`}
+                    </button>
+                  </div>
+                )}
 
                 {filteredVideos.length === 0 && (
                   <Card className="p-8 text-center text-slate-500 w-full col-span-full">
@@ -1186,7 +1206,7 @@ export default function BooksScreen() {
                   </div>
                 )}
 
-                {filtered.map((b) => (
+                {filtered.slice(0, visibleCount).map((b) => (
                   <div key={b.id} className="relative group">
                     <BookCard
                       book={b}
@@ -1205,6 +1225,19 @@ export default function BooksScreen() {
                     )}
                   </div>
                 ))}
+
+                {filtered.length > visibleCount && (
+                  <div className="w-full col-span-full flex justify-center pt-2">
+                    <button
+                      onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+                      className="px-6 py-2.5 rounded-full bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition shadow-sm"
+                    >
+                      {isAR
+                        ? `عرض المزيد (${filtered.length - visibleCount} متبقٍ)`
+                        : `Load more (${filtered.length - visibleCount} more)`}
+                    </button>
+                  </div>
+                )}
 
                 {filtered.length === 0 && (
                   <Card className="p-8 text-center text-slate-500 w-full col-span-full">
