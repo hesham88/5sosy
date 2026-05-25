@@ -157,7 +157,11 @@ const dict = {
     pageNavigation: 'Navegación de páginas',
     translate: 'Traducir',
     showOriginal: 'Ver original',
-    translating: 'Traduciendo…'
+    translating: 'Traduciendo…',
+    mindMap: 'Mapa mental',
+    mindMapTitle: 'Mapa mental del libro',
+    mindMapGenerating: 'Creando el mapa mental…',
+    mindMapEmpty: 'No se pudo generar un mapa mental para este libro.'
   },
   common: {
     loading: 'Cargando…',

@@ -157,7 +157,11 @@ const dict = {
     pageNavigation: 'Seitennavigation',
     translate: 'Übersetzen',
     showOriginal: 'Original anzeigen',
-    translating: 'Übersetze…'
+    translating: 'Übersetze…',
+    mindMap: 'Mindmap',
+    mindMapTitle: 'Mindmap des Buches',
+    mindMapGenerating: 'Mindmap wird erstellt…',
+    mindMapEmpty: 'Für dieses Buch konnte keine Mindmap erstellt werden.'
   },
   common: {
     loading: 'Lädt…',

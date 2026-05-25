@@ -157,7 +157,11 @@ const dict = {
     pageNavigation: 'Page Navigation',
     translate: 'Translate',
     showOriginal: 'Show original',
-    translating: 'Translating…'
+    translating: 'Translating…',
+    mindMap: 'Mind map',
+    mindMapTitle: 'Book mind map',
+    mindMapGenerating: 'Building the mind map…',
+    mindMapEmpty: 'Could not generate a mind map for this book.'
   },
   common: {
     loading: 'Loading…',

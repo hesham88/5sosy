@@ -12,6 +12,51 @@ import { SUBJECT_META } from '@/constants/subjects';
 import type { Book } from '@/lib/types';
 import { LocaleBlock } from '@/i18n/LocaleBlock';
 
+type MindNode = { title: string; summary?: string; page?: number | null; children?: MindNode[] };
+
+const BRANCH_COLORS = [
+  'border-sky-400 bg-sky-50',
+  'border-amber-400 bg-amber-50',
+  'border-emerald-400 bg-emerald-50',
+  'border-violet-400 bg-violet-50',
+  'border-rose-400 bg-rose-50',
+  'border-cyan-400 bg-cyan-50',
+  'border-orange-400 bg-orange-50',
+  'border-indigo-400 bg-indigo-50',
+];
+
+function MindMapNode({ node, depth, branch, onJump, pageLabel }: {
+  node: MindNode; depth: number; branch: number;
+  onJump: (n: number) => void; pageLabel: (n: number) => string;
+}) {
+  const hasPage = typeof node.page === 'number' && node.page > 0;
+  const color = depth === 1 ? BRANCH_COLORS[branch % BRANCH_COLORS.length] : 'border-slate-200 bg-white';
+  return (
+    <li className="my-1">
+      <div className={`inline-flex items-center gap-2 rounded-xl border ps-3 pe-2 py-1.5 ${color}`}>
+        <span className={`${depth === 0 ? 'text-[15px] font-extrabold' : depth === 1 ? 'text-[13px] font-bold' : 'text-[12.5px] font-medium'} text-slate-800`}>
+          {node.title}
+        </span>
+        {hasPage && (
+          <button
+            onClick={() => onJump(node.page as number)}
+            className="text-[11px] font-bold text-sky-700 bg-white/70 hover:bg-sky-600 hover:text-white rounded-full px-2 py-0.5 border border-sky-200 transition shrink-0"
+          >
+            {pageLabel(node.page as number)}
+          </button>
+        )}
+      </div>
+      {Array.isArray(node.children) && node.children.length > 0 && (
+        <ul className="ms-4 ps-3 border-s border-dashed border-slate-200 mt-1">
+          {node.children.map((c, i) => (
+            <MindMapNode key={i} node={c} depth={depth + 1} branch={depth === 0 ? i : branch} onJump={onJump} pageLabel={pageLabel} />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
 export default function Page({ params }: { params: Promise<{ locale: string; id: string }> }) {
   const { locale, id } = use(params);
   const { isAR, t } = useApp();
@@ -40,6 +85,38 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+
+  // Mind map state (session-scoped; generated on demand)
+  const [mindmapOpen, setMindmapOpen] = useState(false);
+  const [mindmap, setMindmap] = useState<MindNode | null>(null);
+  const [mindmapLoading, setMindmapLoading] = useState(false);
+  const [mindmapError, setMindmapError] = useState(false);
+
+  async function loadMindmap() {
+    setMindmapOpen(true);
+    if (mindmap || mindmapLoading) return;
+    setMindmapLoading(true);
+    setMindmapError(false);
+    try {
+      const res = await fetch('/api/books/mindmap', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ bookId: id, locale, title: (isAR ? book?.arT : book?.enT) || book?.enT || '' }),
+      });
+      const d = await res.json();
+      if (d?.status === 'ok' && d.mindmap) setMindmap(d.mindmap);
+      else setMindmapError(true);
+    } catch {
+      setMindmapError(true);
+    } finally {
+      setMindmapLoading(false);
+    }
+  }
+
+  function jumpToPage(n: number) {
+    setCurrentPageNum(n);
+    setMindmapOpen(false);
+  }
 
   useEffect(() => {
     const provider = (process.env.NEXT_PUBLIC_DATABASE_PROVIDER || 'firestore').toLowerCase();
@@ -373,6 +450,14 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
                 <span className="hidden sm:inline">{translateOn ? t.books.showOriginal : t.books.translate}</span>
               </button>
               <button
+                onClick={loadMindmap}
+                className="inline-flex items-center gap-1.5 text-[12px] font-bold px-3 h-9 rounded-full border bg-white text-slate-700 border-slate-200 hover:border-violet-400 transition"
+                title={t.books.mindMap}
+              >
+                <span>🧠</span>
+                <span className="hidden sm:inline">{t.books.mindMap}</span>
+              </button>
+              <button
                 disabled={currentPageNum <= 1}
                 onClick={() => setCurrentPageNum(prev => Math.max(1, prev - 1))}
                 className="w-9 h-9 rounded-full bg-white border border-slate-200 text-slate-700 hover:border-sky-500 disabled:opacity-50 transition grid place-items-center font-bold"
@@ -511,6 +596,57 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
           </div>
         </div>
       </div>
+
+      {mindmapOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setMindmapOpen(false)}
+        >
+          <div
+            className="bg-white rounded-3xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+            dir={isAR ? 'rtl' : 'ltr'}
+          >
+            <div className="flex items-center gap-2 px-5 py-4 border-b border-slate-100 shrink-0">
+              <span className="text-2xl">🧠</span>
+              <h3 className="font-extrabold text-slate-900 text-[16px]">{t.books.mindMapTitle}</h3>
+              <button
+                onClick={() => setMindmapOpen(false)}
+                className="ms-auto w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 grid place-items-center font-bold transition"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5 slim">
+              {mindmapLoading ? (
+                <div className="flex flex-col items-center justify-center py-16 text-slate-500 gap-3">
+                  <div className="w-8 h-8 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
+                  <span className="text-[13px] font-medium">{t.books.mindMapGenerating}</span>
+                </div>
+              ) : mindmapError || !mindmap ? (
+                <div className="text-center py-16 text-slate-500 text-[13px]">{t.books.mindMapEmpty}</div>
+              ) : (
+                <>
+                  {mindmap.summary && (
+                    <p className="text-[13px] text-slate-600 leading-relaxed mb-4 bg-slate-50 rounded-xl p-3 border border-slate-100">
+                      {mindmap.summary}
+                    </p>
+                  )}
+                  <ul className="text-start">
+                    <MindMapNode
+                      node={mindmap}
+                      depth={0}
+                      branch={0}
+                      onJump={jumpToPage}
+                      pageLabel={(n) => (isAR ? `صفحة ${n}` : `Page ${n}`)}
+                    />
+                  </ul>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </ChromeLayout>
   );
 }

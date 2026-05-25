@@ -157,7 +157,11 @@ const dict = {
     pageNavigation: '页面导航',
     translate: '翻译',
     showOriginal: '显示原文',
-    translating: '翻译中…'
+    translating: '翻译中…',
+    mindMap: '思维导图',
+    mindMapTitle: '书籍思维导图',
+    mindMapGenerating: '正在生成思维导图…',
+    mindMapEmpty: '无法为这本书生成思维导图。'
   },
   common: {
     loading: '加载中…',

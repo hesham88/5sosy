@@ -155,7 +155,11 @@ const dict = {
     pageNavigation: 'فهرس الصفحات',
     translate: 'ترجمة',
     showOriginal: 'النص الأصلي',
-    translating: 'بترجم…'
+    translating: 'بترجم…',
+    mindMap: 'خريطة ذهنية',
+    mindMapTitle: 'الخريطة الذهنية للكتاب',
+    mindMapGenerating: 'بجهّز الخريطة الذهنية…',
+    mindMapEmpty: 'تعذّر إنشاء خريطة ذهنية لهذا الكتاب.'
   },
   common: {
     loading: 'بيحمّل…',

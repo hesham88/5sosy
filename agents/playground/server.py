@@ -1842,6 +1842,90 @@ async def books_ask(req: AskRequest, x_api_key: str | None = Header(default=None
 
     return {"answer": answer, "citations": citations, "sessionId": session_id}
 
+
+async def _sample_book_pages(book_id: str, max_pages: int = 40) -> list[dict]:
+    """Evenly sample pages across ONE book so a whole-book overview (mind map)
+    sees the full arc without blowing the prompt budget on huge textbooks."""
+    if os.getenv("DATABASE_PROVIDER", "firestore").lower() != "mongodb":
+        return []
+    from shared.mongodb_client import get_mongodb_client
+    _, mdb = get_mongodb_client()
+    loop = asyncio.get_running_loop()
+    docs = await loop.run_in_executor(None, lambda: list(mdb["book_pages"].find(
+        {"bookId": book_id}, {"_id": 0, "pageNumber": 1, "text": 1}).sort("pageNumber", 1)))
+    if not docs:
+        return []
+    if len(docs) <= max_pages:
+        sampled = docs
+    else:
+        step = len(docs) / max_pages
+        sampled = [docs[int(i * step)] for i in range(max_pages)]
+    return [{"pageNumber": d.get("pageNumber"), "text": (d.get("text") or "")[:700]} for d in sampled]
+
+
+class MindMapRequest(BaseModel):
+    bookId: str
+    locale: str = "ar"
+    title: str = ""
+
+
+@app.post("/v1/books/mindmap")
+async def books_mindmap(req: MindMapRequest, x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> dict:
+    """Generate a hierarchical study mind map (JSON tree) for ONE book, in the
+    student's locale, with page hints so nodes can deep-link into the reader."""
+    _require_api_key(x_api_key)
+    pages = await _sample_book_pages(req.bookId, 40)
+    if not pages:
+        return {"status": "empty", "mindmap": None}
+
+    context = "\n\n".join(f"[Page {p['pageNumber']}]\n{p['text']}" for p in pages if p.get("text"))
+    locale_name = _ASK_LOCALE_NAMES.get(req.locale, "the student's language")
+    prompt = (
+        "You are an expert curriculum designer. Build a STUDY MIND MAP of the textbook below, "
+        f"written entirely in {locale_name}. "
+        "Output STRICT JSON only — no markdown, no prose, no code fence. Schema:\n"
+        '{"title": string, "summary": string, "children": [ {"title": string, "page": number|null, '
+        '"children": [ {"title": string, "page": number|null, "children": []} ] } ] }\n'
+        "Rules: root title = the book's overall subject; 4-8 top-level branches = major themes/chapters; "
+        "each with 2-6 child nodes = key concepts; at most 3 levels deep. Set \"page\" to the most relevant "
+        "page number from the [Page N] markers when a node maps to one, else null. Keep titles short "
+        f"(2-6 words) and in {locale_name}. Keep equations, formulas, and proper nouns intact.\n\n"
+        f"BOOK TITLE: {req.title or '(unknown)'}\n\nBOOK CONTENT (sampled pages):\n{context}\n\nJSON:"
+    )
+    try:
+        client = genai.Client()
+        resp = await client.aio.models.generate_content(
+            model=os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite"),
+            contents=prompt,
+            config=types.GenerateContentConfig(temperature=0.2, response_mime_type="application/json"),
+        )
+        raw = (getattr(resp, "text", None) or "").strip()
+        raw = "".join(c for c in raw if not (0xD800 <= ord(c) <= 0xDFFF))
+    except Exception as e:
+        print(f"mindmap: generation failed: {e}")
+        raise HTTPException(status_code=502, detail=f"mindmap generation failed: {e}")
+
+    mindmap = None
+    try:
+        mindmap = json.loads(raw)
+    except Exception:
+        s, e2 = raw.find("{"), raw.rfind("}")
+        if s != -1 and e2 != -1:
+            try:
+                mindmap = json.loads(raw[s:e2 + 1])
+            except Exception:
+                mindmap = None
+    if not isinstance(mindmap, dict) or not mindmap.get("title"):
+        return {"status": "error", "mindmap": None, "raw": raw[:500]}
+
+    return {
+        "status": "ok",
+        "mindmap": mindmap,
+        "locale": req.locale,
+        "dir": "rtl" if req.locale == "ar" else "ltr",
+    }
+
+
 async def index_book_to_mongo(book_id: str, ocr_results_json: str, book_metadata_json: str) -> int:
     """Index an uploaded book's OCR'd pages into MongoDB (book_pages w/ embeddings) and
     upsert the books doc — the mongodb counterpart of index_book_to_firestore so user
