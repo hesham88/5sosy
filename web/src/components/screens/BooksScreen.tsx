@@ -106,6 +106,7 @@ export default function BooksScreen() {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
+  const [searchSuggestion, setSearchSuggestion] = useState<string | null>(null);
 
   // Mobile filters drawer
   const [showMobileFilters, setShowMobileFilters] = useState(false);
@@ -536,19 +537,23 @@ export default function BooksScreen() {
   }, [syncStatus?.status]);
 
   // Vector Search handler
-  const handleVectorSearch = async () => {
-    if (!searchQuery.trim()) return;
+  const handleVectorSearch = async (overrideQuery?: string) => {
+    const q = (overrideQuery ?? searchQuery).trim();
+    if (!q) return;
+    if (overrideQuery) setSearchQuery(overrideQuery);
     setSearchLoading(true);
     setShowSearchModal(true);
+    setSearchSuggestion(null);
     try {
       const res = await fetch('/api/books/search', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ query: searchQuery, limit: 12, mode: 'smart' })
+        body: JSON.stringify({ query: q, limit: 12, mode: 'smart' })
       });
       if (res.ok) {
         const data = await res.json();
         setSearchResults(data.results || []);
+        setSearchSuggestion(data.didYouMean && data.didYouMean.toLowerCase() !== q.toLowerCase() ? data.didYouMean : null);
       } else {
         console.error('Vector search failed');
       }
@@ -724,7 +729,7 @@ export default function BooksScreen() {
                 className="flex-1 bg-transparent border-none text-[13.5px] text-slate-800 focus:outline-none py-1.5 min-w-0"
               />
               <button
-                onClick={handleVectorSearch}
+                onClick={() => handleVectorSearch()}
                 className="bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-[12.5px] px-4 py-2 rounded-lg transition shadow-sm whitespace-nowrap"
               >
                 {isAR ? 'بحث ذكي' : 'Smart Search'}
@@ -1350,6 +1355,18 @@ export default function BooksScreen() {
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-4 pr-1 slim">
+              {searchSuggestion && !searchLoading && (
+                <div className="text-[13px] text-slate-600 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5">
+                  {isAR ? 'هل تقصد:' : 'Did you mean:'}{' '}
+                  <button
+                    onClick={() => handleVectorSearch(searchSuggestion)}
+                    className="font-bold text-amber-700 hover:underline"
+                  >
+                    {searchSuggestion}
+                  </button>
+                  {isAR ? '؟' : '?'}
+                </div>
+              )}
               {searchLoading ? (
                 <div className="space-y-4 py-12">
                   <div className="flex justify-center"><div className="w-8 h-8 border-4 border-sky-600 border-t-transparent rounded-full animate-spin"></div></div>

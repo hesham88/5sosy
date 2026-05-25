@@ -85,6 +85,7 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [searchSuggestion, setSearchSuggestion] = useState<string | null>(null);
 
   // Mind map state (session-scoped; generated on demand)
   const [mindmapOpen, setMindmapOpen] = useState(false);
@@ -257,21 +258,25 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
   }, [translateOn, currentPageNum, currentPage?.text, book, locale]);
 
   // Handle local searching in book
-  const handleLocalSearch = async () => {
-    if (!searchQuery.trim()) {
+  const handleLocalSearch = async (overrideQuery?: string) => {
+    const q = (overrideQuery ?? searchQuery).trim();
+    if (!q) {
       setSearchResults([]);
       return;
     }
+    if (overrideQuery) setSearchQuery(overrideQuery);
     setSearchLoading(true);
+    setSearchSuggestion(null);
     try {
       const res = await fetch('/api/books/search', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ query: searchQuery, limit: 10, mode: 'smart', bookId: id })
+        body: JSON.stringify({ query: q, limit: 10, mode: 'smart', bookId: id })
       });
       if (res.ok) {
         const data = await res.json();
         setSearchResults(data.results || []);
+        setSearchSuggestion(data.didYouMean && data.didYouMean.toLowerCase() !== q.toLowerCase() ? data.didYouMean : null);
       }
     } catch (err) {
       console.error('Local search error:', err);
@@ -399,12 +404,21 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
                 className="flex-1 bg-transparent border-none text-[13px] focus:outline-none p-1.5 min-w-0"
               />
               <button
-                onClick={handleLocalSearch}
+                onClick={() => handleLocalSearch()}
                 className="bg-sky-600 hover:bg-sky-700 text-white text-[12px] font-bold px-4 py-1.5 rounded-lg whitespace-nowrap"
               >
                 {isAR ? 'بحث ذكي' : 'Smart Search'}
               </button>
             </div>
+            {searchSuggestion && !searchLoading && (
+              <div className="text-[11.5px] text-slate-600 mt-1.5">
+                {isAR ? 'هل تقصد:' : 'Did you mean:'}{' '}
+                <button onClick={() => handleLocalSearch(searchSuggestion)} className="font-bold text-amber-600 hover:underline">
+                  {searchSuggestion}
+                </button>
+                {isAR ? '؟' : '?'}
+              </div>
+            )}
             {searchLoading ? (
               <div className="text-center py-3"><div className="w-5 h-5 border-2 border-sky-600 border-t-transparent rounded-full animate-spin mx-auto" /></div>
             ) : searchResults.length > 0 ? (

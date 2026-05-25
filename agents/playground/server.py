@@ -1408,6 +1408,36 @@ class SearchRequest(BaseModel):
     bookId: str | None = None
 
 
+def _suggest_from_docs(query_words: list[str], docs: list[dict]) -> str | None:
+    """Derive a "Did you mean?" correction from the pages a FUZZY pass matched.
+    The exact pass found nothing but fuzzy did, so the user likely mistyped a
+    real content word — find the closest actual token in the matched pages for
+    each query word and rebuild the query. Returns None if nothing changed."""
+    import difflib
+    import re as _re
+    vocab: dict[str, str] = {}  # lowercased token -> original-cased token
+    for d in docs[:3]:
+        for tok in _re.findall(r"[A-Za-z؀-ۿ]{3,}", d.get("text", "")):
+            vocab.setdefault(tok.lower(), tok)
+    if not vocab:
+        return None
+    keys = list(vocab.keys())
+    corrected: list[str] = []
+    changed = False
+    for w in query_words:
+        wl = w.lower()
+        if len(w) < 3 or wl in vocab:
+            corrected.append(w)
+            continue
+        m = difflib.get_close_matches(wl, keys, n=1, cutoff=0.8)
+        if m and m[0] != wl:
+            corrected.append(vocab[m[0]])
+            changed = True
+        else:
+            corrected.append(w)
+    return " ".join(corrected) if changed else None
+
+
 async def _resolve_book_titles(results: list[dict]) -> list[dict]:
     """Page docs often lack a usable bookTitle ("Unknown Book"). Resolve real
     titles (ar + en) from the `books` collection in one batch lookup."""
@@ -1466,6 +1496,7 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
 
     provider = os.getenv("DATABASE_PROVIDER", "firestore").lower()
     results = []
+    did_you_mean = None
 
     if req.mode in ("exact", "smart"):
         # Direct DB queries for exact search to prevent OOM
@@ -1521,7 +1552,10 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
 
                 docs = await loop.run_in_executor(None, lambda: _run(False))
                 if not docs:
-                    docs = await loop.run_in_executor(None, lambda: _run(True))
+                    fuzzy_docs = await loop.run_in_executor(None, lambda: _run(True))
+                    if fuzzy_docs:
+                        did_you_mean = _suggest_from_docs(words, fuzzy_docs)
+                    docs = fuzzy_docs
                 results.extend(_shape(docs))
                 atlas_ok = True
             except Exception as e:
@@ -1640,14 +1674,14 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
                 print(f"$vectorSearch unavailable, falling back to in-memory cosine: {e}")
 
         if used_vector_search:
-            return {"results": await _resolve_book_titles(top_matches), "engine": "vectorSearch"}
+            return {"results": await _resolve_book_titles(top_matches), "engine": "vectorSearch", "didYouMean": did_you_mean}
 
         # On MongoDB, never run the full-collection in-memory cosine — it OOMs the
         # container (503). $vectorSearch is the semantic path; while the Atlas index
         # is still building (or briefly unavailable) return whatever exact found
         # (smart mode) or empty, rather than crashing.
         if provider == "mongodb":
-            return {"results": await _resolve_book_titles(results), "engine": "vectorSearch-pending"}
+            return {"results": await _resolve_book_titles(results), "engine": "vectorSearch-pending", "didYouMean": did_you_mean}
 
         # ---- Fallback (Firestore only): in-memory cosine over the page cache ----
         if not _cache_loaded or not _pages_cache or (time.time() - _last_cache_load_time > 3600):
@@ -1707,7 +1741,7 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
 
         results = top_matches
 
-    return {"results": await _resolve_book_titles(results)}
+    return {"results": await _resolve_book_titles(results), "didYouMean": did_you_mean}
 
 
 # ----------------------- Document RAG (in-book tutor) -----------------------
