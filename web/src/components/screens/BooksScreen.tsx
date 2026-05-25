@@ -100,6 +100,9 @@ export default function BooksScreen() {
 
   // Video selected for modal player
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
+  // Active item within a crawled playlist (null = playlist default / single video)
+  const [activeItemId, setActiveItemId] = useState<string | null>(null);
+  useEffect(() => { setActiveItemId(null); }, [selectedVideo]);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -1413,23 +1416,32 @@ export default function BooksScreen() {
 
       {/* Premium Video Modal Iframe Player */}
       {selectedVideo && (() => {
-        const { embedUrl, isPlaylist } = parseYouTube(selectedVideo.youtubeUrl);
+        const { embedUrl } = parseYouTube(selectedVideo.youtubeUrl);
+        const items = selectedVideo.items || [];
+        const hasItems = items.length > 0;
+        const listParam = selectedVideo.playlistId ? `&list=${selectedVideo.playlistId}` : '';
+        // When a specific crawled item is chosen, play it (inside the playlist
+        // context); otherwise fall back to the playlist/single-video embed.
+        const playerSrc = activeItemId
+          ? `https://www.youtube.com/embed/${activeItemId}?rel=0${listParam}`
+          : embedUrl;
+        const activeTitle = activeItemId ? items.find(i => i.videoId === activeItemId)?.title : null;
 
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
             <div className="fixed inset-0" onClick={() => setSelectedVideo(null)} />
-            <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col z-50">
+            <div className="relative w-full max-w-5xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col z-50">
               <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/50">
                 <div className="min-w-0">
                   <span className="text-[10px] uppercase font-bold text-sky-400 tracking-wider">
                     {selectedVideo.subject.toUpperCase()} · {selectedVideo.grade}
                   </span>
                   <h3 className="text-[15px] font-extrabold text-white truncate mt-0.5">
-                    {selectedVideo.title}
+                    {activeTitle || selectedVideo.title}
                   </h3>
-                  {isPlaylist && (
+                  {hasItems && (
                     <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-bold text-amber-300">
-                      🎞️ {isAR ? 'قائمة تشغيل — تنقّل بين الفيديوهات داخل المشغّل' : 'Playlist — use the in-player list to switch videos'}
+                      🎞️ {isAR ? `قائمة تشغيل — ${items.length} فيديو` : `Playlist — ${items.length} videos`}
                     </span>
                   )}
                 </div>
@@ -1440,30 +1452,60 @@ export default function BooksScreen() {
                   ✕
                 </button>
               </div>
-              
-              <div className="relative w-full aspect-video bg-black">
-                {embedUrl ? (
-                  <iframe
-                    src={embedUrl}
-                    title={selectedVideo.title}
-                    frameBorder="0"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                    className="absolute inset-0 w-full h-full"
-                  />
-                ) : (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-400">
-                    <span>{isAR ? 'رابط الفيديو غير صالح' : 'Invalid video URL'}</span>
-                    {selectedVideo.youtubeUrl && (
-                      <a
-                        href={selectedVideo.youtubeUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sky-400 hover:text-sky-300 text-[13px] font-semibold"
-                      >
-                        {isAR ? 'افتح على يوتيوب ↗' : 'Open on YouTube ↗'}
-                      </a>
-                    )}
+
+              <div className={`flex flex-col ${hasItems ? 'lg:flex-row' : ''}`}>
+                <div className={`relative w-full aspect-video bg-black ${hasItems ? 'lg:flex-1' : ''}`}>
+                  {playerSrc ? (
+                    <iframe
+                      src={playerSrc}
+                      title={activeTitle || selectedVideo.title}
+                      frameBorder="0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                      className="absolute inset-0 w-full h-full"
+                    />
+                  ) : (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-400">
+                      <span>{isAR ? 'رابط الفيديو غير صالح' : 'Invalid video URL'}</span>
+                      {selectedVideo.youtubeUrl && (
+                        <a
+                          href={selectedVideo.youtubeUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sky-400 hover:text-sky-300 text-[13px] font-semibold"
+                        >
+                          {isAR ? 'افتح على يوتيوب ↗' : 'Open on YouTube ↗'}
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {hasItems && (
+                  <div className="lg:w-80 shrink-0 max-h-[260px] lg:max-h-[60vh] overflow-y-auto slim bg-slate-950/40 border-t lg:border-t-0 lg:border-s border-slate-800 p-2 space-y-1">
+                    {items.map((it, i) => {
+                      const active = (activeItemId ?? items[0]?.videoId) === it.videoId;
+                      return (
+                        <button
+                          key={it.videoId}
+                          onClick={() => setActiveItemId(it.videoId)}
+                          className={`w-full flex items-start gap-2.5 p-2 rounded-xl text-start transition ${
+                            active ? 'bg-sky-600/20 ring-1 ring-sky-500/40' : 'hover:bg-slate-800/60'
+                          }`}
+                        >
+                          <div className="relative w-20 shrink-0 aspect-video rounded-lg overflow-hidden bg-slate-800">
+                            {it.thumbnail
+                              // eslint-disable-next-line @next/next/no-img-element
+                              ? <img src={it.thumbnail} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                              : <span className="absolute inset-0 grid place-items-center text-slate-500 text-[10px]">▶</span>}
+                            <span className="absolute bottom-0.5 end-0.5 bg-black/70 text-white text-[9px] font-bold rounded px-1">{i + 1}</span>
+                          </div>
+                          <span className={`text-[11.5px] leading-snug line-clamp-3 ${active ? 'text-white font-semibold' : 'text-slate-300'}`}>
+                            {it.title}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>

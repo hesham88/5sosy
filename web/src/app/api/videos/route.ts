@@ -22,6 +22,8 @@ export async function GET(req: Request) {
         term: doc.term || '',
         youtubeUrl: doc.youtubeUrl || '',
         sourceUrl: doc.sourceUrl || '',
+        playlistId: doc.playlistId || undefined,
+        items: Array.isArray(doc.items) ? doc.items : undefined,
       }));
       videos.sort((a, b) => a.title.localeCompare(b.title));
       return NextResponse.json(videos);
@@ -42,6 +44,8 @@ export async function GET(req: Request) {
             term: data.term || '',
             youtubeUrl: data.youtubeUrl || '',
             sourceUrl: data.sourceUrl || '',
+            playlistId: data.playlistId || undefined,
+            items: Array.isArray(data.items) ? data.items : undefined,
           });
         } catch (err) {
           console.warn('[api/videos] skipped malformed doc', d.id, err);

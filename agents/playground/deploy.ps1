@@ -56,6 +56,15 @@ $webOrigins = "http://localhost:3000,https://khsosyapphosting--khsosy.us-east4.h
 # `^@^` overrides gcloud's default `,` delimiter so commas inside ALLOWED_ORIGINS don't break parsing.
 $envVars = "^@^GEMINI_MODEL=gemini-3.1-flash-lite@GOOGLE_GENAI_USE_VERTEXAI=FALSE@DATABASE_PROVIDER=mongodb@ALLOWED_ORIGINS=$webOrigins@SYNC_JOB_NAME=khsosybot-sync@SYNC_JOB_REGION=$Region@SYNC_JOB_PROJECT=$Project@GCS_BUCKET=khsosy.firebasestorage.app"
 
+# Secrets mounted as env vars. YOUTUBE_API_KEY is appended only if the secret
+# exists, so deploys keep working before the playlist crawler key is provisioned.
+$secrets = "GOOGLE_API_KEY=gemini-api-key:latest,AGENTS_API_KEY=khsosybot-api-key:latest,MONGODB_URI=mongodb-uri:latest"
+$ytSecret = gcloud secrets describe youtube-api-key --project $Project --format "value(name)" 2>$null
+if ($ytSecret) {
+  $secrets = "$secrets,YOUTUBE_API_KEY=youtube-api-key:latest"
+  Write-Host "Mounting YOUTUBE_API_KEY from Secret Manager." -ForegroundColor Cyan
+}
+
 Write-Host "Deploying $Service to $Region in $Project (this builds the container in Cloud Build)..." -ForegroundColor Cyan
 
 # --no-cpu-throttling: keeps CPU always allocated so BackgroundTasks (custom PDF
@@ -77,7 +86,7 @@ gcloud run deploy $Service `
   --concurrency 10 `
   --timeout 3600 `
   --set-env-vars $envVars `
-  --set-secrets "GOOGLE_API_KEY=gemini-api-key:latest,AGENTS_API_KEY=khsosybot-api-key:latest,MONGODB_URI=mongodb-uri:latest"
+  --set-secrets $secrets
 
 if ($LASTEXITCODE -ne 0) {
   Write-Host "Deploy failed." -ForegroundColor Red

@@ -1316,6 +1316,33 @@ async def ingestion_migration(
     return await _handle_job_command("migration", req.command)
 
 
+class CrawlPlaylistsRequest(BaseModel):
+    dry_run: bool = False
+    limit: int | None = None
+
+
+@app.post("/v1/videos/crawl-playlists")
+async def crawl_playlists_endpoint(
+    req: CrawlPlaylistsRequest,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> dict:
+    """Expand each videos.{youtubeUrl} playlist into an items[] array on the doc.
+    Runs here (not locally) because Cloud Run is the Atlas-whitelisted host."""
+    _require_api_key(x_api_key)
+    api_key = os.getenv("YOUTUBE_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="YOUTUBE_API_KEY not configured on the service")
+    if os.getenv("DATABASE_PROVIDER", "firestore").lower() != "mongodb":
+        raise HTTPException(status_code=400, detail="playlist crawl requires DATABASE_PROVIDER=mongodb")
+    from shared.mongodb_client import get_mongodb_client
+    from playlist_crawler import crawl_playlists
+    _, mongo_db = get_mongodb_client()
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None, lambda: crawl_playlists(api_key, mongo_db, dry_run=req.dry_run, limit=req.limit)
+    )
+
+
 
 # In-memory cache for page embeddings
 _pages_cache: list[dict] = []

@@ -195,6 +195,13 @@ export type IngestionStatus = {
   errorMessage?: string;
 };
 
+export type PlaylistItem = {
+  videoId: string;
+  title: string;
+  position: number;
+  thumbnail: string;
+};
+
 export type Video = {
   id: string;
   title: string;
@@ -205,4 +212,6 @@ export type Video = {
   youtubeUrl: string;
   sourceUrl: string;
   createdAtMs?: number;
+  playlistId?: string;
+  items?: PlaylistItem[];
 };

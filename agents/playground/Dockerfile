@@ -21,6 +21,7 @@ COPY translation_agent ./translation_agent
 COPY ask_me_agent ./ask_me_agent
 COPY shared ./shared
 COPY server.py ./
+COPY playlist_crawler.py ./
 COPY sync_job_main.py ./
 COPY harvester_job_main.py ./
 COPY analyzer_job_main.py ./
