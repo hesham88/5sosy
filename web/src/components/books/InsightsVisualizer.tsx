@@ -145,12 +145,12 @@ export default function InsightsVisualizer({ isAR }: InsightsVisualizerProps) {
           </div>
 
           {/* Types card */}
-          <div className="p-6 rounded-2xl bg-white border border-slate-200 shadow-sm">
+          <div className="p-6 rounded-2xl bg-white border border-slate-200 shadow-sm flex flex-col">
             <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
               <span>📚</span> {isAR ? 'أنواع مصادر التعلم' : 'Resource Categories'}
             </h3>
-            <div className="space-y-4">
-              {Object.entries(data.types).map(([type, count]) => {
+            <div className="space-y-4 overflow-y-auto max-h-[280px] pr-2 slim">
+              {Object.entries(data.types).sort((a, b) => b[1] - a[1]).map(([type, count]) => {
                 const pct = getPercentage(count, data.totalBooks);
                 return (
                   <div key={type} className="space-y-2">
@@ -176,8 +176,8 @@ export default function InsightsVisualizer({ isAR }: InsightsVisualizerProps) {
           <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
             <span>🔬</span> {isAR ? 'الكتب حسب المواد الدراسية' : 'Distribution by Subject'}
           </h3>
-          <div className="space-y-4 flex-1 overflow-y-auto max-h-[360px] pr-2">
-            {Object.entries(data.subjects).map(([subject, count]) => {
+          <div className="space-y-4 flex-1 overflow-y-auto max-h-[360px] pr-2 slim">
+            {Object.entries(data.subjects).sort((a, b) => b[1] - a[1]).map(([subject, count]) => {
               const pct = getPercentage(count, data.totalBooks);
               return (
                 <div key={subject} className="space-y-2">

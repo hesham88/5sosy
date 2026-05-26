@@ -455,10 +455,16 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
                 {isAR ? '؟' : '?'}
               </div>
             )}
-            {searchLoading ? (
+            {searchLoading && (
               <div className="text-center py-3"><div className="w-5 h-5 border-2 border-sky-600 border-t-transparent rounded-full animate-spin mx-auto" /></div>
-            ) : searchResults.length > 0 ? (
-              <div className="absolute z-20 left-4 right-4 lg:left-6 lg:right-6 mt-2 max-h-[280px] overflow-y-auto space-y-2 slim bg-white border border-slate-200 rounded-xl shadow-lg p-2">
+            )}
+            {/* Results slide down in-flow, pushing the page below — not an overlay. */}
+            <div
+              className={`overflow-hidden transition-all duration-300 ease-out ${
+                !searchLoading && searchResults.length > 0 ? 'max-h-[300px] opacity-100 mt-2' : 'max-h-0 opacity-0 mt-0'
+              }`}
+            >
+              <div className="max-h-[300px] overflow-y-auto space-y-2 slim border border-slate-200 rounded-xl bg-white p-2">
                 {searchResults.map((res: any, idx: number) => {
                   const active = res.pageNumber === currentPageNum;
                   return (
@@ -478,7 +484,8 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
                   );
                 })}
               </div>
-            ) : searchQuery.trim() !== '' && (
+            </div>
+            {!searchLoading && searchResults.length === 0 && searchQuery.trim() !== '' && (
               <div className="text-[11px] text-slate-400 italic text-center py-2">{t.books.noMatchingPagesShort}</div>
             )}
           </div>

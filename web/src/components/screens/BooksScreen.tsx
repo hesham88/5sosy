@@ -63,29 +63,22 @@ function parseYouTube(url: string): { embedUrl: string | null; isPlaylist: boole
   return { embedUrl: null, isPlaylist: false, videoId: null, listId: null };
 }
 
-// Floating "back to top" — the catalog can run very long (1500+ books, paged).
-// The page itself is the scroll container (ChromeLayout uses normal document
-// flow), so we scroll the window.
-function BackToTop({ label }: { label: string }) {
-  const [show, setShow] = useState(false);
-  useEffect(() => {
-    const onScroll = () => setShow(window.scrollY > 700);
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, []);
-  if (!show) return null;
-  return (
-    <button
-      onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-      title={label}
-      aria-label={label}
-      className="fixed bottom-6 start-6 z-40 inline-flex items-center gap-1.5 rounded-full bg-slate-900/90 hover:bg-slate-900 text-white text-[12px] font-bold px-4 py-2.5 shadow-lg backdrop-blur transition"
-    >
-      <span aria-hidden>↑</span>
-      <span className="hidden sm:inline">{label}</span>
-    </button>
-  );
+// Sortable rank for a grade label so the filter lists eldest grades first.
+// Higher = older student (3rd secondary highest → 1st primary lowest).
+function gradeRank(g: string): number {
+  const s = (g || '').trim();
+  const gm = s.match(/G\s*(\d+)/i); // English codes G10/G11/G12 → secondary-ish
+  if (gm) return 300 + parseInt(gm[1], 10);
+  let stage = 0;
+  if (/ثانوي/.test(s)) stage = 3;
+  else if (/عدادي/.test(s)) stage = 2; // matches إعدادي / اعدادي
+  else if (/ابتدائي/.test(s)) stage = 1;
+  const ord: Record<string, number> = {
+    'الأول': 1, 'الاول': 1, 'الثاني': 2, 'الثالث': 3, 'الرابع': 4, 'الخامس': 5, 'السادس': 6,
+  };
+  let n = 0;
+  for (const [k, v] of Object.entries(ord)) { if (s.includes(k)) { n = v; break; } }
+  return stage * 10 + n;
 }
 
 export default function BooksScreen() {
@@ -418,16 +411,22 @@ export default function BooksScreen() {
         if (match) grades.add(match[0].trim());
       });
     }
-    return Array.from(grades).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    // Eldest grades first (3rd secondary → 1st primary); unknowns sink to the bottom.
+    return Array.from(grades).sort((a, b) => {
+      const d = gradeRank(b) - gradeRank(a);
+      return d !== 0 ? d : a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+    });
   }, [activeBooks, dbVideos, activeTab]);
 
-  // Book types list for official catalog
+  // Book types list for official catalog — most-stocked type first (Student Book).
   const availableTypes = useMemo(() => {
-    const types = new Set<string>();
+    const counts = new Map<string, number>();
     officialBooks.forEach(b => {
-      if (b.type) types.add(b.type);
+      if (b.type) counts.set(b.type, (counts.get(b.type) || 0) + 1);
     });
-    return Array.from(types).sort();
+    return Array.from(counts.entries())
+      .sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]))
+      .map(([type]) => type);
   }, [officialBooks]);
 
   // Localized display labels for the filter dropdowns. The option VALUE stays
@@ -739,7 +738,6 @@ export default function BooksScreen() {
 
   return (
     <ChromeLayout>
-      <BackToTop label={t.books.backToTop} />
       <div className="px-4 lg:px-8 py-6 max-w-[1500px] mx-auto">
         {/* Header Hero banner */}
         <div className="mb-6 rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
