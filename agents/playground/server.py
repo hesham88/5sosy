@@ -123,11 +123,19 @@ async def _ensure_vector_index():
             print("ensure_vector_index: no embeddings yet; skipping vector index")
             return
         dims = len(sample["embedding"])
+        # Filter paths enable in-index pre-filtering for subject search. NOTE: these
+        # are only useful once book_pages carry these fields — run the page
+        # reconciliation job first. Adding a path to an EXISTING index needs a
+        # rebuild (drop + recreate, or updateSearchIndex); this create-if-absent
+        # path only applies them to a fresh index.
         definition = {"fields": [
             {"type": "vector", "path": "embedding", "numDimensions": dims, "similarity": "cosine"},
             {"type": "filter", "path": "bookId"},
             {"type": "filter", "path": "subject"},
             {"type": "filter", "path": "grade"},
+            {"type": "filter", "path": "type"},
+            {"type": "filter", "path": "language"},
+            {"type": "filter", "path": "bookType"},
         ]}
         model = SearchIndexModel(definition=definition, name=index_name, type="vectorSearch")
         await loop.run_in_executor(None, lambda: coll.create_search_index(model=model))
