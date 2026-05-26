@@ -274,8 +274,145 @@ async function streamChat({
   }
 }
 
+type FeedbackDict = {
+  reportButton: string; title: string; intro: string; name: string; email: string;
+  subject: string; description: string; reproduce: string; attachment: string;
+  attachmentHint: string; optional: string; submit: string; submitting: string;
+  success: string; errorGeneric: string; tooLarge: string; cancel: string;
+};
+
+const MAX_ATTACH_BYTES = 2 * 1024 * 1024;
+
+function FeedbackForm({
+  t, locale, sessionId, onClose, onDone,
+}: {
+  t: { feedback: FeedbackDict };
+  locale: string;
+  sessionId: string | null;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const f = t.feedback;
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [subject, setSubject] = useState('');
+  const [description, setDescription] = useState('');
+  const [reproduce, setReproduce] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!subject.trim() || !description.trim() || busy) return;
+    if (file && file.size > MAX_ATTACH_BYTES) {
+      setError(f.tooLarge);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append('subject', subject);
+      fd.append('description', description);
+      fd.append('name', name);
+      fd.append('email', email);
+      fd.append('reproduce', reproduce);
+      fd.append('locale', locale);
+      if (sessionId) fd.append('sessionId', sessionId);
+      if (file) fd.append('file', file);
+      const res = await fetch('/api/feedback', { method: 'POST', body: fd });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || 'failed');
+      }
+      onDone();
+    } catch {
+      setError(f.errorGeneric);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const labelCls = 'block text-[11.5px] font-bold text-slate-600 mb-1';
+  const inputCls =
+    'w-full rounded-lg border border-slate-200 px-2.5 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-400';
+
+  return (
+    <div className="absolute inset-0 z-20 bg-white flex flex-col">
+      <div className="px-4 py-3 border-b border-slate-200 flex items-center gap-2">
+        <span aria-hidden>⚑</span>
+        <span className="font-bold text-[14px] text-slate-900">{f.title}</span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={f.cancel}
+          className="ms-auto w-7 h-7 grid place-items-center rounded-lg hover:bg-slate-100 text-slate-500 text-lg leading-none"
+        >
+          ×
+        </button>
+      </div>
+      <form onSubmit={submit} className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+        <p className="text-[12.5px] text-slate-500">{f.intro}</p>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className={labelCls}>{f.name} <span className="text-slate-400 font-normal">· {f.optional}</span></label>
+            <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />
+          </div>
+          <div>
+            <label className={labelCls}>{f.email} <span className="text-slate-400 font-normal">· {f.optional}</span></label>
+            <input className={inputCls} type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={busy} />
+          </div>
+        </div>
+        <div>
+          <label className={labelCls}>{f.subject}</label>
+          <input className={inputCls} value={subject} onChange={(e) => setSubject(e.target.value)} disabled={busy} required />
+        </div>
+        <div>
+          <label className={labelCls}>{f.description}</label>
+          <textarea className={`${inputCls} resize-none`} rows={3} value={description} onChange={(e) => setDescription(e.target.value)} disabled={busy} required />
+        </div>
+        <div>
+          <label className={labelCls}>{f.reproduce} <span className="text-slate-400 font-normal">· {f.optional}</span></label>
+          <textarea className={`${inputCls} resize-none`} rows={2} value={reproduce} onChange={(e) => setReproduce(e.target.value)} disabled={busy} />
+        </div>
+        <div>
+          <label className={labelCls}>{f.attachment} <span className="text-slate-400 font-normal">· {f.optional}</span></label>
+          <input
+            type="file"
+            accept="image/*,application/pdf"
+            disabled={busy}
+            onChange={(e) => {
+              const sel = e.target.files?.[0] || null;
+              if (sel && sel.size > MAX_ATTACH_BYTES) {
+                setError(f.tooLarge);
+                setFile(null);
+                e.target.value = '';
+              } else {
+                setError(null);
+                setFile(sel);
+              }
+            }}
+            className="block w-full text-[12px] text-slate-600 file:me-2 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-[12px] file:font-semibold"
+          />
+          <p className="text-[10.5px] text-slate-400 mt-1">{f.attachmentHint}</p>
+        </div>
+        {error && <div className="text-[12px] text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-2">{error}</div>}
+      </form>
+      <div className="border-t border-slate-200 p-2.5 flex justify-end gap-2 bg-white">
+        <button type="button" onClick={onClose} disabled={busy} className="rounded-lg border border-slate-200 px-3 py-2 text-[13px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+          {f.cancel}
+        </button>
+        <button type="button" onClick={submit} disabled={busy || !subject.trim() || !description.trim()} className="rounded-lg bg-sky-600 hover:bg-sky-700 disabled:bg-slate-300 text-white px-4 py-2 text-[13px] font-semibold">
+          {busy ? f.submitting : f.submit}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function FiveSosyBot() {
-  const { locale, isAR } = useApp();
+  const { locale, isAR, t } = useApp();
   const dict = T[isAR ? 'ar' : 'en'];
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -284,6 +421,11 @@ export function FiveSosyBot() {
   const sessionIdRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+
+  // Problem-report form (hybrid: opened from a button or when the agent
+  // classifies a report_feedback intent; captured via a structured form and
+  // persisted server-side through /api/feedback).
+  const [showForm, setShowForm] = useState(false);
 
   // Keep the newest message in view. Defer to the next frame so the streamed
   // content is laid out before we measure scrollHeight.
@@ -339,6 +481,7 @@ export function FiveSosyBot() {
         },
         onFinal: (f) => {
           sessionIdRef.current = f.session_id;
+          if (f.intent === 'report_feedback') setShowForm(true);
           setMessages((m) =>
             m.map((msg) =>
               msg.id === botMsgId && msg.role === 'bot'
@@ -425,13 +568,38 @@ export function FiveSosyBot() {
             </div>
             <button
               type="button"
+              onClick={() => setShowForm(true)}
+              title={t.feedback.reportButton}
+              aria-label={t.feedback.reportButton}
+              className="ms-auto w-8 h-8 grid place-items-center rounded-lg hover:bg-white/15 text-base leading-none"
+            >
+              ⚑
+            </button>
+            <button
+              type="button"
               aria-label={dict.close}
               onClick={() => setOpen(false)}
-              className="ms-auto w-8 h-8 grid place-items-center rounded-lg hover:bg-white/15 text-lg leading-none"
+              className="w-8 h-8 grid place-items-center rounded-lg hover:bg-white/15 text-lg leading-none"
             >
               ×
             </button>
           </div>
+
+          {showForm && (
+            <FeedbackForm
+              t={t}
+              locale={locale}
+              sessionId={sessionIdRef.current}
+              onClose={() => setShowForm(false)}
+              onDone={() => {
+                setShowForm(false);
+                setMessages((m) => [
+                  ...m,
+                  { id: uid(), role: 'bot', text: t.feedback.success, trace: [], streaming: false },
+                ]);
+              }}
+            />
+          )}
 
           <div ref={listRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-2.5 bg-slate-50/40">
             {messages.length === 0 && (

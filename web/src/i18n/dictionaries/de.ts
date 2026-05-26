@@ -397,6 +397,25 @@ const dict = {
     disclaimerTitle: 'Wichtig: KI kann Fehler machen',
     disclaimerBody: 'Die Antworten von 5sosy werden von einer KI erzeugt und können unvollständig oder falsch sein. Überprüfe sie immer selbst und kläre sie mit deiner Lehrkraft oder einem Elternteil, bevor du dich darauf verlässt – besonders vor einer Prüfung.',
     disclaimerReport: 'Einen Fehler oder ein Problem entdeckt? Bitte melde es über den 5sosy-Assistenten in der unteren Ecke, damit wir es beheben können.',
+  },
+  feedback: {
+    reportButton: 'Problem melden',
+    title: 'Problem melden',
+    intro: 'Einen Fehler entdeckt oder etwas funktioniert nicht? Sag uns Bescheid und wir schauen es uns an.',
+    name: 'Dein Name',
+    email: 'E-Mail',
+    subject: 'Betreff',
+    description: 'Was ist passiert?',
+    reproduce: 'Wie nachstellbar',
+    attachment: 'Screenshot oder Datei anhängen',
+    attachmentHint: 'Max. 2 MB · Bild oder PDF',
+    optional: 'optional',
+    submit: 'Meldung senden',
+    submitting: 'Senden…',
+    success: 'Danke! Deine Meldung wurde gesendet – wir prüfen sie.',
+    errorGeneric: 'Meldung konnte nicht gesendet werden. Bitte erneut versuchen.',
+    tooLarge: 'Datei ist zu groß (max. 2 MB).',
+    cancel: 'Abbrechen',
   }
 } satisfies Dictionary;
 

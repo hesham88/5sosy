@@ -4,7 +4,7 @@ import { use, useEffect, useRef, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { collection, doc, getDoc, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { getFirebase } from '@/lib/firebase/client';
-import { bookFromFirestore } from '@/lib/books';
+import { bookFromFirestore, bookTitle, bookSubtitle } from '@/lib/books';
 import { ChromeLayout } from '@/components/shared/Chrome';
 import { useApp } from '@/components/shared/Providers';
 import { Card, Btn, SubjectChip } from '@/components/shared/atoms';
@@ -384,8 +384,8 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
 
           <Card className="p-4 flex flex-col gap-3 shrink-0">
             <SubjectChip id={book.subject} size="sm" />
-            <h2 className="font-extrabold text-[16px] text-slate-900 leading-snug">{isAR ? book.arT : book.enT}</h2>
-            <p className="text-[12px] text-slate-500">{isAR ? book.arSub : book.enSub}</p>
+            <h2 className="font-extrabold text-[16px] text-slate-900 leading-snug">{bookTitle(book, locale)}</h2>
+            <p className="text-[12px] text-slate-500">{bookSubtitle(book, locale)}</p>
             <div className="flex justify-between items-center text-[11px] text-slate-400 border-t border-slate-100 pt-3">
               <span>{book.pages} {t.books.pages}</span>
               <span>{t.books.year} {book.year}</span>

@@ -397,6 +397,25 @@ const dict = {
     disclaimerTitle: '重要提示：AI 可能会出错',
     disclaimerBody: '5sosy 的回答由 AI 生成，可能不完整或不准确。请务必自行复核，并在依赖这些内容之前与老师或家长确认，尤其是在考试之前。',
     disclaimerReport: '发现错误或问题？请通过右下角的 5sosy 助手报告，以便我们及时修复。',
+  },
+  feedback: {
+    reportButton: '报告问题',
+    title: '报告问题',
+    intro: '发现错误或有功能无法使用？告诉我们，我们会跟进处理。',
+    name: '你的名字',
+    email: '邮箱',
+    subject: '主题',
+    description: '发生了什么？',
+    reproduce: '如何复现',
+    attachment: '附加截图或文件',
+    attachmentHint: '最大 2 MB · 图片或 PDF',
+    optional: '可选',
+    submit: '提交报告',
+    submitting: '提交中…',
+    success: '谢谢！你的报告已提交——我们会查看。',
+    errorGeneric: '无法提交报告，请重试。',
+    tooLarge: '文件过大（最大 2 MB）。',
+    cancel: '取消',
   }
 } satisfies Dictionary;
 

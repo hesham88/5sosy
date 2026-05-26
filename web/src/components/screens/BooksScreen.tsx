@@ -6,7 +6,7 @@ import { collection, doc, onSnapshot } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { getFirebase } from '@/lib/firebase/client';
 import { useAuth } from '@/lib/firebase/auth-context';
-import { bookFromFirestore, bookMatchesQuery, compareBooks, normalizeSubject } from '@/lib/books';
+import { bookFromFirestore, bookMatchesQuery, compareBooks, normalizeSubject, bookTitle, bookSubtitle } from '@/lib/books';
 import { ChromeLayout } from '../shared/Chrome';
 import { useApp } from '../shared/Providers';
 import { AgentLog, Btn, Card, Ring, SubjectChip, type AgentLogLine } from '../shared/atoms';
@@ -1977,15 +1977,16 @@ function CatalogTab({ active, onClick, label, count }: { active: boolean; onClic
 }
 
 function BookCard({ book, selected, onToggle, onViewDetails }: { book: Book; selected: boolean; onToggle: () => void; onViewDetails: () => void }) {
-  const { isAR, t } = useApp();
+  const { isAR, t, locale } = useApp();
   const meta = SUBJECT_META[book.subject] || { glyph: '📚', hue: 'stone', ar: book.subject, en: book.subject };
   const isLocked = book.status !== 'indexed';
   const isAdded = book.type === 'Added Book';
   // Most MOE books only carry Arabic metadata; fall back across ar/en so a
   // non-Arabic shell still shows the title/subtitle instead of a blank.
   const pick = (ar?: string, en?: string) => (isAR ? ar || en : en || ar) || '';
-  const title = pick(book.arT, book.enT);
-  const subtitle = pick(book.arSub, book.enSub);
+  // Title/subtitle prefer the pre-translated locale field (when present).
+  const title = bookTitle(book, locale);
+  const subtitle = bookSubtitle(book, locale);
   const typeLabel = pick(book.arType, book.enType);
   const details = [
     pick(book.arGrade, book.enGrade),

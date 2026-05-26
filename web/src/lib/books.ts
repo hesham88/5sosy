@@ -84,7 +84,28 @@ export function bookFromFirestore(id: string, data: RawBookDoc): Book {
     enType: text(data.enType, type),
     arSubject: text(data.arSubject, rawSubject),
     enSubject: text(data.enSubject, rawSubject),
+    titleI18n: localeMap(data.titleI18n),
+    subI18n: localeMap(data.subI18n),
   };
+}
+
+function localeMap(v: unknown): Record<string, string> | undefined {
+  if (!v || typeof v !== 'object') return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+    if (typeof val === 'string' && val.trim()) out[k] = val;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+// Locale-aware metadata accessors. Prefer the pre-translated field for the
+// active locale, then the ar/en pair, then anything non-empty.
+export function bookTitle(book: Book, locale: string): string {
+  return book.titleI18n?.[locale] || (locale === 'ar' ? book.arT : book.enT) || book.enT || book.arT || '';
+}
+
+export function bookSubtitle(book: Book, locale: string): string {
+  return book.subI18n?.[locale] || (locale === 'ar' ? book.arSub : book.enSub) || book.enSub || book.arSub || '';
 }
 
 export function compareBooks(a: Book, b: Book): number {

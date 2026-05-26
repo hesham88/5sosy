@@ -397,6 +397,25 @@ const dict = {
     disclaimerTitle: 'Importante: la IA puede equivocarse',
     disclaimerBody: 'Las respuestas de 5sosy las genera una IA y pueden estar incompletas o ser incorrectas. Revísalas siempre por tu cuenta y confírmalas con tu profesor o un familiar antes de confiar en ellas, sobre todo antes de un examen.',
     disclaimerReport: '¿Encontraste un error o un problema? Repórtalo a través del asistente 5sosy en la esquina inferior para que podamos corregirlo.',
+  },
+  feedback: {
+    reportButton: 'Reportar un problema',
+    title: 'Reportar un problema',
+    intro: '¿Encontraste un error o algo que no funciona? Cuéntanos y lo revisaremos.',
+    name: 'Tu nombre',
+    email: 'Correo electrónico',
+    subject: 'Asunto',
+    description: '¿Qué pasó?',
+    reproduce: 'Cómo reproducirlo',
+    attachment: 'Adjuntar captura o archivo',
+    attachmentHint: 'Máx. 2 MB · imagen o PDF',
+    optional: 'opcional',
+    submit: 'Enviar reporte',
+    submitting: 'Enviando…',
+    success: '¡Gracias! Tu reporte fue enviado — lo revisaremos.',
+    errorGeneric: 'No se pudo enviar tu reporte. Inténtalo de nuevo.',
+    tooLarge: 'El archivo es demasiado grande (máx. 2 MB).',
+    cancel: 'Cancelar',
   }
 } satisfies Dictionary;
 
