@@ -40,6 +40,8 @@ _WORD = re.compile(r"[A-Za-z؀-ۿ]{3,}")
 
 KEYWORDS_PER_PAGE = int(os.getenv("RECONCILE_KEYWORDS_PER_PAGE", "8"))
 BOOK_BATCH = int(os.getenv("RECONCILE_BOOK_BATCH", "50"))
+# Safety knob for a first production run: process only the first N books (0 = all).
+RECONCILE_LIMIT = int(os.getenv("RECONCILE_LIMIT", "0"))
 
 
 def _extract_keywords(text: str, k: int = KEYWORDS_PER_PAGE) -> list[str]:
@@ -98,6 +100,9 @@ def run_reconciliation_pipeline(status_ref=None) -> dict:
     started = time.time()
 
     cursor = books.find({}, {"subject": 1, "grade": 1, "type": 1, "language": 1})
+    if RECONCILE_LIMIT > 0:
+        cursor = cursor.limit(RECONCILE_LIMIT)
+        _log(status_ref, f"RECONCILE_LIMIT={RECONCILE_LIMIT} — processing a subset for verification.")
     for book in cursor:
         bid = book.get("_id")
         subject = book.get("subject") or ""

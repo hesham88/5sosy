@@ -23,6 +23,7 @@ dependencies = [
     "psutil>=5.9.0",
     "pymongo>=4.6.0",
     "dnspython>=2.6.0",
+    "numpy>=1.26.0",
 ]
 
 [project.optional-dependencies]
@@ -50,5 +51,9 @@ include = [
     "language_detection_agent*",
     "translation_agent*",
     "ask_me_agent*",
+    "feedback_agent*",
+    "subject_search_agent*",
+    "page_reconciliation_agent*",
+    "mindmap_worker_agent*",
     "shared*"
 ]

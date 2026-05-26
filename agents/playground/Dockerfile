@@ -20,6 +20,9 @@ COPY language_detection_agent ./language_detection_agent
 COPY translation_agent ./translation_agent
 COPY ask_me_agent ./ask_me_agent
 COPY feedback_agent ./feedback_agent
+COPY subject_search_agent ./subject_search_agent
+COPY page_reconciliation_agent ./page_reconciliation_agent
+COPY mindmap_worker_agent ./mindmap_worker_agent
 COPY shared ./shared
 COPY scripts ./scripts
 COPY server.py ./
@@ -28,6 +31,8 @@ COPY sync_job_main.py ./
 COPY harvester_job_main.py ./
 COPY analyzer_job_main.py ./
 COPY migration_job_main.py ./
+COPY reconcile_pages_job_main.py ./
+COPY mindmap_job_main.py ./
 
 RUN pip install .
 
