@@ -1523,36 +1523,89 @@ def cosine_similarity(v1, v2):
     return dot_product(v1, v2) / (mag1 * mag2)
 
 
-def _search_tokens(query: str) -> list[str]:
-    """Expand a query into searchable tokens for the Atlas full-text pass.
-    Splits on whitespace, also de-possessives ("Planck's" -> "Planck") and
-    splits hyphen/slash compounds ("right-hand" -> "right","hand") so a page
-    that wrote the variant still matches. De-duped, order preserved."""
+# Question scaffolding / filler that carries no topic meaning. Stripping it
+# stops verbose queries ("can you tell me what you know about fleming right hand
+# rule") from matching unrelated pages on words like you/what/about/explain.
+_STOPWORDS = frozenset({
+    # English
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being", "of", "on", "in",
+    "to", "for", "about", "what", "whats", "which", "who", "whom", "how", "why", "when",
+    "where", "do", "does", "did", "you", "your", "yours", "me", "my", "mine", "i", "we",
+    "us", "our", "can", "could", "would", "should", "shall", "will", "please", "tell",
+    "explain", "describe", "define", "definition", "give", "show", "list", "know", "this",
+    "that", "these", "those", "it", "its", "and", "or", "with", "as", "at", "by", "from",
+    "into", "more", "some", "any", "all", "want", "need", "help", "tellme", "pls",
+    # Arabic (incl. Egyptian)
+    "ما", "ماهو", "ماهي", "هو", "هي", "عن", "ايه", "إيه", "ممكن", "اشرح", "اشرحلي",
+    "وضح", "عرف", "عرّف", "قولي", "قوللي", "ايش", "إيش", "في", "من", "على", "الى",
+    "إلى", "و", "يعني", "ازاي", "إزاي", "كيف", "ليه", "ليش", "انا", "أنا", "عايز",
+    "عاوز", "محتاج", "هل", "ده", "دي", "اللي",
+    # French
+    "le", "la", "les", "un", "une", "des", "de", "du", "qu", "quest", "quel", "quelle",
+    "que", "quoi", "est", "ce", "cest", "peux", "tu", "sur", "dis", "moi", "donne",
+    "explique", "expliquer", "definis", "définis", "comment", "pourquoi", "je", "nous",
+    "et", "ou", "avec", "dans", "plus", "parle", "parler", "sais",
+})
+
+
+def _query_terms(query: str) -> tuple[list[str], int, str]:
+    """Clean + tokenize a query for search.
+
+    Returns (expanded_tokens, content_count, cleaned_query):
+      - expanded_tokens — content tokens for the Atlas full-text `should` pass,
+        de-possessived ("Planck's"->"Planck") and hyphen/slash-split.
+      - content_count — number of distinct content words (drives minimumShouldMatch).
+      - cleaned_query — content words joined, for the semantic embedding (a tight
+        topical query embeds far better than a chatty sentence).
+    Falls back to the raw query when cleaning would empty it."""
     import re as _re
-    out: list[str] = []
+    raw = [w for w in _re.split(r"\s+", query.strip().lower()) if w]
+    content: list[str] = []
     seen: set[str] = set()
+    for w in raw:
+        w = _re.sub(r"^[^\w'’؀-ۿ]+|[^\w'’؀-ۿ]+$", "", w)
+        if not w or w in _STOPWORDS:
+            continue
+        if w not in seen:
+            seen.add(w)
+            content.append(w)
+    if not content:  # query was all stopwords/punctuation — keep the raw words
+        content = [w for w in raw if w]
+
+    expanded: list[str] = []
+    eseen: set[str] = set()
 
     def add(tok: str) -> None:
         tok = tok.strip()
-        if len(tok) >= 2 and tok.lower() not in seen:
-            seen.add(tok.lower())
-            out.append(tok)
+        if len(tok) >= 2 and tok not in eseen:
+            eseen.add(tok)
+            expanded.append(tok)
 
-    for t in [w for w in _re.split(r"\s+", query.strip()) if w]:
+    for t in content:
         add(t)
-        base = _re.sub(r"['’]s$", "", t)  # trailing 's / 's
+        base = _re.sub(r"['’]s$", "", t)
         if base != t:
             add(base)
         for part in _re.split(r"[-/]", t):
             add(part)
-    return out or [query.strip()]
+    cleaned = " ".join(content).strip() or query.strip()
+    return (expanded or [query.strip()]), len(content), cleaned
+
+
+_SEM_ONLY_MIN_NORM = float(os.getenv("SEARCH_SEM_ONLY_MIN_NORM", "0.5"))
+_SEM_ABS_FLOOR = float(os.getenv("SEARCH_SEM_ABS_FLOOR", "0"))  # 0 = off; raw vectorSearchScore
+_RESULT_REL_FLOOR = float(os.getenv("SEARCH_RESULT_REL_FLOOR", "0.4"))
+_RESULT_ABS_FLOOR = float(os.getenv("SEARCH_RESULT_ABS_FLOOR", "0.2"))
 
 
 def _merge_hybrid(exact: list[dict], semantic: list[dict], limit: int) -> list[dict]:
     """Blend exact (BM25) and semantic (cosine) hits into one ranking. The two
     score scales differ, so min-max normalize each list to [0,1], then combine
-    (exact weighted a touch higher to keep precise full-text matches on top) and
-    boost pages that BOTH passes found. Dedupe by (bookId, pageNumber)."""
+    (exact weighted higher to keep precise full-text matches on top) and boost
+    pages found by BOTH passes. To suppress the irrelevant tail that pure
+    semantic produces for short/ambiguous queries, drop semantic-only hits below
+    a normalized bar (and an optional absolute floor), then apply a relevance
+    floor relative to the top score. Dedupe by (bookId, pageNumber)."""
     def norm(items: list[dict]) -> dict:
         if not items:
             return {}
@@ -1563,7 +1616,7 @@ def _merge_hybrid(exact: list[dict], semantic: list[dict], limit: int) -> list[d
             return 1.0 if hi == lo else (s - lo) / (hi - lo)
 
         return {
-            (i.get("bookId"), i.get("pageNumber")): (i, nv(float(i.get("score") or 0)))
+            (i.get("bookId"), i.get("pageNumber")): (i, nv(float(i.get("score") or 0)), float(i.get("score") or 0))
             for i in items
         }
 
@@ -1571,17 +1624,33 @@ def _merge_hybrid(exact: list[dict], semantic: list[dict], limit: int) -> list[d
     keys = list(ex.keys()) + [k for k in se.keys() if k not in ex]
     merged: list[dict] = []
     for k in keys:
-        ei, en = ex.get(k, (None, 0.0))
-        si, sn = se.get(k, (None, 0.0))
+        et = ex.get(k)
+        st = se.get(k)
+        ei, en = (et[0], et[1]) if et else (None, 0.0)
+        si, sn, sraw = (st[0], st[1], st[2]) if st else (None, 0.0, 0.0)
+        # Suppress weak semantic-only noise (no exact support).
+        if ei is None:
+            if sn < _SEM_ONLY_MIN_NORM:
+                continue
+            if _SEM_ABS_FLOOR > 0 and sraw < _SEM_ABS_FLOOR:
+                continue
         item = dict(ei or si or {})
-        combined = 0.55 * en + 0.45 * sn
+        if not item.get("text") and si and si.get("text"):
+            item["text"] = si["text"]
+        # Drop results with no readable preview text — these are blank/figure-only
+        # pages that semantic search sometimes surfaces as weak noise; they're
+        # useless to show and read as irrelevant.
+        if not (item.get("text") or "").strip():
+            continue
+        combined = 0.6 * en + 0.4 * sn
         if ei and si:
             combined += 0.15  # found by both passes → strong signal
         item["score"] = round(min(1.0, combined), 4)
-        if not item.get("text") and si and si.get("text"):
-            item["text"] = si["text"]
         merged.append(item)
     merged.sort(key=lambda x: x["score"], reverse=True)
+    if merged:
+        floor = max(_RESULT_ABS_FLOOR, _RESULT_REL_FLOOR * merged[0]["score"])
+        merged = [m for m in merged if m["score"] >= floor]
     return merged[:limit]
 
 
@@ -1595,6 +1664,13 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
     provider = os.getenv("DATABASE_PROVIDER", "firestore").lower()
     results = []
     did_you_mean = None
+
+    # Clean the query once: drop filler/question words, expand content tokens for
+    # the full-text pass, and build a tight query for the embedding.
+    search_words, content_count, cleaned_query = _query_terms(req.query)
+    # Require multiple content words to co-occur once the query is specific
+    # enough; keep OR=1 for 1–2 word queries so recall stays high.
+    min_should = 2 if content_count >= 3 else 1
 
     if req.mode in ("exact", "smart"):
         # Direct DB queries for exact search to prevent OOM
@@ -1630,7 +1706,7 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
             # when the precise pass finds nothing (typos + "did you mean").
             cand = max(req.limit * 3, 30)
             try:
-                words = _search_tokens(req.query)
+                words = search_words
 
                 def _run(fuzzy: bool):
                     should = [
@@ -1638,7 +1714,7 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
                                   **({"fuzzy": {"maxEdits": 1, "prefixLength": 3}} if fuzzy else {})}}
                         for w in words
                     ]
-                    comp: dict = {"should": should, "minimumShouldMatch": 1}
+                    comp: dict = {"should": should, "minimumShouldMatch": min(min_should, len(should))}
                     if req.bookId:
                         comp["filter"] = [{"equals": {"path": "bookId", "value": req.bookId}}]
                     pipeline = [
@@ -1723,7 +1799,7 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
             client = genai.Client()
             response = await client.aio.models.embed_content(
                 model="models/gemini-embedding-2",
-                contents=req.query
+                contents=cleaned_query
             )
             embs = response.embeddings
             if not embs or not embs[0].values:
