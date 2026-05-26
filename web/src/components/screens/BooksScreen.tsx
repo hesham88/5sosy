@@ -430,6 +430,20 @@ export default function BooksScreen() {
     return Array.from(types).sort();
   }, [officialBooks]);
 
+  // Localized display labels for the filter dropdowns. The option VALUE stays
+  // the raw (Arabic) string so filtering still matches; only the shown text is
+  // translated via the per-book i18n maps.
+  const gradeLabels = useMemo(() => {
+    const m = new Map<string, string>();
+    activeBooks.forEach((b) => { if (b.grade && !m.has(b.grade)) m.set(b.grade, bookGrade(b, locale)); });
+    return m;
+  }, [activeBooks, locale]);
+  const typeLabels = useMemo(() => {
+    const m = new Map<string, string>();
+    officialBooks.forEach((b) => { if (b.type && !m.has(b.type)) m.set(b.type, bookType(b, locale)); });
+    return m;
+  }, [officialBooks, locale]);
+
   // Languages list for active filter
   const availableLanguages = useMemo(() => {
     const langs = new Set<string>();
@@ -1031,6 +1045,8 @@ export default function BooksScreen() {
               availableLanguages={availableLanguages}
               availableYears={availableYears}
               availablePublishers={availablePublishers}
+              gradeLabels={gradeLabels}
+              typeLabels={typeLabels}
               activeTab={activeTab}
             />
           </aside>
@@ -1354,6 +1370,8 @@ export default function BooksScreen() {
                 availableLanguages={availableLanguages}
                 availableYears={availableYears}
                 availablePublishers={availablePublishers}
+                gradeLabels={gradeLabels}
+                typeLabels={typeLabels}
                 activeTab={activeTab}
               />
             </div>
@@ -1594,6 +1612,8 @@ function FilterContent({
   availableLanguages,
   availableYears,
   availablePublishers,
+  gradeLabels,
+  typeLabels,
   activeTab
 }: {
   isAR: boolean;
@@ -1619,6 +1639,8 @@ function FilterContent({
   availableLanguages: string[];
   availableYears: number[];
   availablePublishers: string[];
+  gradeLabels: Map<string, string>;
+  typeLabels: Map<string, string>;
   activeTab: string;
 }) {
   return (
@@ -1679,7 +1701,7 @@ function FilterContent({
           >
             <option value="all">{t.books.allGrades}</option>
             {availableGrades.map((g) => (
-              <option key={g} value={g}>{g}</option>
+              <option key={g} value={g}>{gradeLabels.get(g) || g}</option>
             ))}
           </select>
         </div>
@@ -1697,8 +1719,8 @@ function FilterContent({
             className="w-full text-[13px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-850 focus:outline-none focus:border-sky-500 focus:bg-white transition"
           >
             <option value="all">{t.books.allTypes}</option>
-            {availableTypes.map((t) => (
-              <option key={t} value={t}>{t}</option>
+            {availableTypes.map((ty) => (
+              <option key={ty} value={ty}>{typeLabels.get(ty) || ty}</option>
             ))}
           </select>
         </div>
