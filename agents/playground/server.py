@@ -1351,6 +1351,100 @@ async def crawl_playlists_endpoint(
     )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Subject de-duplication (Batch 2). One-off, idempotent data fix: repoint books
+# from each duplicate subject slug onto its canonical slug, delete the orphaned
+# subject docs, and rename French Advanced → "Advanced French". Runs here because
+# Atlas only accepts the Cloud Run service IP. Re-running is a no-op.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# duplicate slug → canonical slug
+DUPLICATE_SUBJECT_MERGES: dict[str, str] = {
+    "computer_science_ict_v2": "computer_science_ict",
+    "islamic_studies_2": "islamic_studies",
+    "programming_and_ai_2": "programming_and_ai",
+    "french_first_language": "first_language",
+    "french_first_language_story": "first_language",
+    "french_language_first_language": "first_language",
+}
+
+
+def _merge_duplicate_subjects(dry_run: bool = False) -> dict:
+    from shared.mongodb_client import get_mongodb_client
+    _, mdb = get_mongodb_client()
+    books = mdb["books"]
+    subjects = mdb["subject"]
+
+    # Safety check: every canonical target must already exist as a subject doc,
+    # otherwise repointed books would orphan and vanish from the listing.
+    canonicals = sorted(set(DUPLICATE_SUBJECT_MERGES.values()))
+    missing_canonicals = [
+        c for c in canonicals if subjects.count_documents({"slug": c}, limit=1) == 0
+    ]
+
+    repointed: dict[str, int] = {}
+    deleted_subjects: list[str] = []
+
+    if dry_run:
+        for dup in DUPLICATE_SUBJECT_MERGES:
+            repointed[dup] = books.count_documents({"subject": dup})
+            if subjects.count_documents({"slug": dup}, limit=1):
+                deleted_subjects.append(dup)
+        return {
+            "ok": True,
+            "dryRun": True,
+            "missingCanonicals": missing_canonicals,
+            "wouldRepoint": repointed,
+            "wouldDeleteSubjects": deleted_subjects,
+        }
+
+    if missing_canonicals:
+        # Refuse to mutate if a target subject is absent — would orphan books.
+        return {
+            "ok": False,
+            "error": "missing canonical subject docs; aborting to avoid orphaning books",
+            "missingCanonicals": missing_canonicals,
+        }
+
+    for dup, canonical in DUPLICATE_SUBJECT_MERGES.items():
+        res = books.update_many({"subject": dup}, {"$set": {"subject": canonical}})
+        repointed[dup] = res.modified_count
+        del_res = subjects.delete_one({"slug": dup})
+        if del_res.deleted_count:
+            deleted_subjects.append(dup)
+
+    # Rename French Advanced → "Advanced French" (Arabic per user spec).
+    renamed: list[str] = []
+    ren = subjects.update_one(
+        {"slug": "french_language_advanced"},
+        {"$set": {"nameI18n.en": "Advanced French", "nameI18n.ar": "لغة فرنسية مستوي رفيع"}},
+    )
+    if ren.matched_count:
+        renamed.append("french_language_advanced")
+
+    return {
+        "ok": True,
+        "repointed": repointed,
+        "deletedSubjects": deleted_subjects,
+        "renamed": renamed,
+    }
+
+
+class MergeSubjectsRequest(BaseModel):
+    dry_run: bool = False
+
+
+@app.post("/v1/subjects/merge-duplicates")
+async def merge_duplicate_subjects(
+    req: MergeSubjectsRequest = MergeSubjectsRequest(),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> dict:
+    _require_api_key(x_api_key)
+    if os.getenv("DATABASE_PROVIDER", "firestore").lower() != "mongodb":
+        raise HTTPException(status_code=400, detail="subject merge requires DATABASE_PROVIDER=mongodb")
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, lambda: _merge_duplicate_subjects(req.dry_run))
+
 
 # In-memory cache for page embeddings
 _pages_cache: list[dict] = []

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ChromeLayout } from '../shared/Chrome';
 import { useApp } from '../shared/Providers';
 import { AgentLog, Btn, Card, SubjectChip, type AgentLogLine } from '../shared/atoms';
-import { SUBJECT_META, HUE } from '@/constants/subjects';
+import { SUBJECT_META, HUE, metaFor } from '@/constants/subjects';
 import { WEEK_PLAN } from '@/constants/seed-data';
 import { callAgent } from '@/lib/agents';
 
@@ -112,7 +112,7 @@ export default function PlanScreen() {
               ) : (
                 <ul className="p-3 pt-2 space-y-1">
                   {day.blocks.map((b, idx) => {
-                    const m = SUBJECT_META[b.subject];
+                    const m = metaFor(b.subject);
                     const h = HUE[m.hue];
                     return (
                       <li key={b.id} className="relative">
@@ -174,7 +174,7 @@ export default function PlanScreen() {
               </div>
               <div className="space-y-2">
                 {bySubject(WEEK_PLAN).map((row) => {
-                  const meta = SUBJECT_META[row.subject];
+                  const meta = metaFor(row.subject);
                   const h = HUE[meta.hue];
                   return (
                     <div key={row.subject}>

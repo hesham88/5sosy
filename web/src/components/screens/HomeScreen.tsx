@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ChromeLayout } from '../shared/Chrome';
 import { useApp } from '../shared/Providers';
 import { AgentLog, Btn, Card, Confetti, Ring, SubjectChip, type AgentLogLine } from '../shared/atoms';
-import { SUBJECT_META, HUE } from '@/constants/subjects';
+import { HUE, metaFor } from '@/constants/subjects';
 import { HOME_PLAN, WEAK_TOPICS, UPCOMING, ACTIVITY } from '@/constants/seed-data';
 import { callAgent } from '@/lib/agents';
 import { useProfile } from '@/lib/firebase/use-profile';
@@ -167,7 +167,7 @@ function TodayPlan() {
 
       <ul className="p-3 pt-4 space-y-1">
         {HOME_PLAN.map((b, idx) => {
-          const m = SUBJECT_META[b.subject];
+          const m = metaFor(b.subject);
           const h = HUE[m.hue];
           const isActive = activeId === b.id;
           const isDone = b.id < activeId;
@@ -311,7 +311,7 @@ function UpcomingExams() {
       </div>
       <div className="px-3 pb-3 space-y-1.5">
         {UPCOMING.map((u) => {
-          const m = SUBJECT_META[u.subject];
+          const m = metaFor(u.subject);
           return (
             <div key={u.id} className={`flex items-center gap-3 p-2.5 rounded-lg
               ${u.urgent ? 'bg-rose-50' : 'hover:bg-slate-50'}`}>

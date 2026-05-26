@@ -4,7 +4,7 @@ import { useMemo } from 'react';
 import { ChromeLayout } from '../shared/Chrome';
 import { useApp } from '../shared/Providers';
 import { Btn, Card, SubjectChip } from '../shared/atoms';
-import { SUBJECT_META, HUE } from '@/constants/subjects';
+import { HUE, metaFor } from '@/constants/subjects';
 import type { SubjectId } from '@/lib/types';
 
 export default function ProgressScreen() {
@@ -198,7 +198,7 @@ function MasteryCard() {
       <div className="font-extrabold text-slate-900 text-[15px] mb-4">{t.progress.perSubjectMastery}</div>
       <div className="space-y-3.5">
         {subjects.map((s) => {
-          const m = SUBJECT_META[s.id];
+          const m = metaFor(s.id);
           const pct = Math.round(s.v * 100);
           return (
             <div key={s.id}>

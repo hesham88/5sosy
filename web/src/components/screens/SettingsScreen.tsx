@@ -5,7 +5,7 @@ import { ChromeLayout } from '../shared/Chrome';
 import { useApp } from '../shared/Providers';
 import { AgentLog, Btn, Card } from '../shared/atoms';
 import { LanguageSwitcher } from '../shared/LanguageSwitcher';
-import { SUBJECT_META, HUE } from '@/constants/subjects';
+import { HUE, metaFor } from '@/constants/subjects';
 
 export default function SettingsScreen() {
   const { isAR, t } = useApp();
@@ -57,7 +57,7 @@ export default function SettingsScreen() {
               { id: 'chemistry' as const, indexed: true,  when: isAR ? 'منذ ٨ أيام'  : '8 days ago' },
               { id: 'math' as const,      indexed: false, when: isAR ? 'لم تتم الفهرسة' : 'not yet indexed' }
             ].map((b) => {
-              const m = SUBJECT_META[b.id];
+              const m = metaFor(b.id);
               return (
                 <div key={b.id} className="flex items-center gap-3 px-3 py-3 bg-slate-50 rounded-lg">
                   <div className={`w-9 h-9 rounded-lg grid place-items-center text-xl ${HUE[m.hue].bg}`}>{m.glyph}</div>

@@ -1,4 +1,4 @@
-import { SUBJECT_META } from '@/constants/subjects';
+import { SUBJECT_META, metaFor } from '@/constants/subjects';
 import type { Book, SubjectId } from '@/lib/types';
 
 type RawBookDoc = Record<string, unknown>;
@@ -63,7 +63,7 @@ export function bookFromFirestore(id: string, data: RawBookDoc): Book {
     mastery: masteryValue(data.mastery),
     lastAccessedAr: text(data.lastAccessedAr, ''),
     lastAccessedEn: text(data.lastAccessedEn, ''),
-    cover: text(data.cover, SUBJECT_META[subject].hue),
+    cover: text(data.cover, metaFor(subject).hue),
     type,
     stage: stage || undefined,
     grade: grade || undefined,

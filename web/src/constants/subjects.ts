@@ -46,6 +46,20 @@ export const TRACK_LABELS: Record<string, { ar: string; en: string }> = {
   lit:      { ar: 'أدبي',       en: 'Literary' },
 };
 
+// Safe accessor: SUBJECT_META is keyed by curated slugs, but subject ids can come
+// from user data, mock plans, or the DB and may not have an entry. Reading
+// `SUBJECT_META[slug].hue` directly throws when the slug is unknown — always go
+// through this so callers get a complete object (slug echoed as the name).
+export function metaFor(slug: string): SubjectMetaItem {
+  const m = SUBJECT_META[slug];
+  if (m) return m;
+  return {
+    ar: slug, en: slug, fr: slug, de: slug, es: slug, it: slug, zh: slug,
+    hue: 'stone', glyph: '📚', tracks: [],
+    description: { ar: '', en: '', fr: '', de: '', es: '', it: '', zh: '' },
+  };
+}
+
 export const SUBJECT_META: Record<string, SubjectMetaItem> = {
   'agriculture_entrepreneurship': {
     ar: "مهارات الزراعة وريادة الاعمال",
@@ -362,27 +376,6 @@ export const SUBJECT_META: Record<string, SubjectMetaItem> = {
       zh: "学习计算机基础知识以及信息与通信技术。",
     }
   },
-  'computer_science_ict_v2': {
-    ar: "الكمبيوتر وتكنولوجيا المعلومات والاتصالات",
-    en: "Computer and ICT",
-    fr: "Informatique et TIC",
-    de: "Informatik und IKT",
-    es: "Informática y TIC",
-    it: "Informatica e TIC",
-    zh: "计算机与信息通信技术",
-    hue: 'sky',
-    glyph: '🖥️',
-    tracks: [],
-    description: {
-      ar: "مقرر دراسي يغطي مهارات الحاسب الآلي والتقنيات الرقمية.",
-      en: "A course covering computer skills and digital technologies.",
-      fr: "Un cours couvrant les compétences informatiques et les technologies numériques.",
-      de: "Ein Kurs, der Computerkenntnisse und digitale Technologien abdeckt.",
-      es: "Un curso que cubre habilidades informáticas y tecnologías digitales.",
-      it: "Un corso che copre le competenze informatiche e le tecnologie digitali.",
-      zh: "涵盖计算机技能和数字技术的课程。",
-    }
-  },
   'development_geography': {
     ar: "جغرافيا التنمية",
     en: "Development Geography",
@@ -530,48 +523,6 @@ export const SUBJECT_META: Record<string, SubjectMetaItem> = {
       zh: "母语学习及读写能力的发展。",
     }
   },
-  'french_first_language': {
-    ar: "اللغة الفرنسية اللغة الاولي",
-    en: "French First Language",
-    fr: "Français langue première",
-    de: "Französisch als Erstsprache",
-    es: "Francés como primera lengua",
-    it: "Francese come prima lingua",
-    zh: "法语第一语言",
-    hue: 'rose',
-    glyph: '🥖',
-    tracks: [],
-    description: {
-      ar: "دراسة متعمقة للغة الفرنسية كلغة أولى.",
-      en: "In-depth study of the French language as a first language.",
-      fr: "Étude approfondie de la langue française en tant que langue première.",
-      de: "Vertiefendes Studium der französischen Sprache als Erstsprache.",
-      es: "Estudio en profundidad del idioma francés como primera lengua.",
-      it: "Studio approfondito della lingua francese come prima lingua.",
-      zh: "深入学习法语作为第一语言。",
-    }
-  },
-  'french_first_language_story': {
-    ar: "اللغة الفرنسية اللغة الاولي قصة",
-    en: "French First Language Story",
-    fr: "Littérature française (récit)",
-    de: "Französische Erzählkunst",
-    es: "Narrativa francesa",
-    it: "Narrativa francese",
-    zh: "法语故事",
-    hue: 'rose',
-    glyph: '🎭',
-    tracks: [],
-    description: {
-      ar: "دراسة النصوص القصصية المقررة في منهج اللغة الفرنسية.",
-      en: "Study of the narrative texts included in the French curriculum.",
-      fr: "Étude des textes narratifs inclus dans le programme de français.",
-      de: "Studium der im Französischlehrplan enthaltenen Erzähltexte.",
-      es: "Estudio de los textos narrativos incluidos en el plan de estudios de francés.",
-      it: "Studio dei testi narrativi inclusi nel programma di francese.",
-      zh: "研究法语课程中包含的叙事文本。",
-    }
-  },
   'french_language': {
     ar: "اللغة الفرنسية",
     en: "French Language",
@@ -594,8 +545,8 @@ export const SUBJECT_META: Record<string, SubjectMetaItem> = {
     }
   },
   'french_language_advanced': {
-    ar: "اللغة الفرنسية مستوى رفيع",
-    en: "French Language Advanced Level",
+    ar: "لغة فرنسية مستوي رفيع",
+    en: "Advanced French",
     fr: "Langue française niveau avancé",
     de: "Französische Sprache fortgeschrittenes Niveau",
     es: "Idioma francés nivel avanzado",
@@ -612,27 +563,6 @@ export const SUBJECT_META: Record<string, SubjectMetaItem> = {
       es: "Un plan de estudios avanzado para mejorar las habilidades en el idioma francés.",
       it: "Un programma avanzato per migliorare le competenze nella lingua francese.",
       zh: "旨在提高法语语言技能的高级课程。",
-    }
-  },
-  'french_language_first_language': {
-    ar: "اللغة الفرنسية اللغة الاولي كراسة",
-    en: "French Language First Language Workbook",
-    fr: "Langue française première langue cahier d'exercices",
-    de: "Französische Sprache Erstsprache Arbeitsheft",
-    es: "Idioma francés primera lengua cuaderno de ejercicios",
-    it: "Lingua francese prima lingua quaderno di esercizi",
-    zh: "法语第一语言练习册",
-    hue: 'sky',
-    glyph: '🇫🇷',
-    tracks: [],
-    description: {
-      ar: "كراسة تدريبات مخصصة لتعلم اللغة الفرنسية كلغة أولى.",
-      en: "A workbook dedicated to learning French as a first language.",
-      fr: "Un cahier d'exercices dédié à l'apprentissage du français comme première langue.",
-      de: "Ein Arbeitsheft für das Erlernen der französischen Sprache als Erstsprache.",
-      es: "Un cuaderno de ejercicios dedicado al aprendizaje del francés como primera lengua.",
-      it: "Un quaderno di esercizi dedicato all'apprendimento del francese come prima lingua.",
-      zh: "一本致力于学习法语作为第一语言的练习册。",
     }
   },
   'general_mathematics': {
@@ -824,27 +754,6 @@ export const SUBJECT_META: Record<string, SubjectMetaItem> = {
       zh: "研究伊斯兰教的原则和价值观。",
     }
   },
-  'islamic_studies_2': {
-    ar: "التربية الدينية الاسلامية",
-    en: "Islamic Religious Education",
-    fr: "Éducation religieuse islamique",
-    de: "Islamischer Religionsunterricht",
-    es: "Educación religiosa islámica",
-    it: "Educazione religiosa islamica",
-    zh: "伊斯兰宗教教育",
-    hue: 'fuchsia',
-    glyph: '☪️',
-    tracks: [],
-    description: {
-      ar: "دراسة مبادئ وقيم الدين الإسلامي.",
-      en: "The study of the principles and values of the Islamic religion.",
-      fr: "L'étude des principes et des valeurs de la religion islamique.",
-      de: "Das Studium der Prinzipien und Werte der islamischen Religion.",
-      es: "El estudio de los principios y valores de la religión islámica.",
-      it: "Lo studio dei principi e dei valori della religione islamica.",
-      zh: "研究伊斯兰教的原则和价值观。",
-    }
-  },
   'library_and_research_skills': {
     ar: "المكتبات ومهارات البحث",
     en: "Library and Research Skills",
@@ -1015,27 +924,6 @@ export const SUBJECT_META: Record<string, SubjectMetaItem> = {
   },
   'programming_and_ai': {
     ar: "البرمجة والذكاء الاصطناعى",
-    en: "Programming and AI",
-    fr: "Programmation et IA",
-    de: "Programmierung und KI",
-    es: "Programación e IA",
-    it: "Programmazione e IA",
-    zh: "编程与人工智能",
-    hue: 'teal',
-    glyph: '💻',
-    tracks: [],
-    description: {
-      ar: "تعلم لغات البرمجة وأساسيات الذكاء الاصطناعي.",
-      en: "Learning programming languages and the basics of artificial intelligence.",
-      fr: "Apprendre les langages de programmation et les bases de l'intelligence artificielle.",
-      de: "Erlernen von Programmiersprachen und den Grundlagen der künstlichen Intelligenz.",
-      es: "Aprender lenguajes de programación y los fundamentos de la inteligencia artificial.",
-      it: "Apprendere i linguaggi di programmazione e le basi dell'intelligenza artificiale.",
-      zh: "学习编程语言和人工智能基础。",
-    }
-  },
-  'programming_and_ai_2': {
-    ar: "البرمجة والذكاء الاصطناعي",
     en: "Programming and AI",
     fr: "Programmation et IA",
     de: "Programmierung und KI",
