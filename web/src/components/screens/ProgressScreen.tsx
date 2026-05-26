@@ -189,9 +189,9 @@ function MasteryCard() {
   const subjects: { id: SubjectId; v: number }[] = [
     { id: 'physics',   v: 0.72 },
     { id: 'chemistry', v: 0.61 },
-    { id: 'math',      v: 0.83 },
-    { id: 'biology',   v: 0.45 },
-    { id: 'arabic',    v: 0.68 }
+    { id: 'mathematics',    v: 0.83 },
+    { id: 'biology',        v: 0.45 },
+    { id: 'arabic_language', v: 0.68 }
   ];
   return (
     <Card className="p-5">

@@ -4,8 +4,8 @@ export const HOME_PLAN: PlanBlock[] = [
   { id: 1, subject: 'physics',   dur: 25, type: 'review',  arT: 'مراجعة قانون بويل', enT: "Review Boyle's Law", arSub: 'الفصل ٤ — الغازات', enSub: 'Ch.4 — Gas Laws' },
   { id: 2, subject: 'physics',   dur: 15, type: 'quiz',    arT: 'اختبار سريع — قوانين الغازات', enT: 'Quick check — Gas Laws', arSub: '٥ أسئلة', enSub: '5 questions' },
   { id: 3, subject: 'chemistry', dur: 20, type: 'lesson',  arT: 'التحليل الكمي — الجزء الأول', enT: 'Quantitative analysis — Part 1', arSub: 'فصل ٢', enSub: 'Chapter 2' },
-  { id: 4, subject: 'math',      dur: 30, type: 'practice', arT: 'تمارين تفاضل وتكامل', enT: 'Calculus drills', arSub: 'سؤال ١٢ نهايات', enSub: '12 problems · limits' },
-  { id: 5, subject: 'arabic',    dur: 15, type: 'audio',   arT: 'ملخص صوتي — النصوص الأدبية', enT: 'Audio summary — Arabic texts', arSub: 'بصوت خصوصي', enSub: "In 5sosy's voice" },
+  { id: 4, subject: 'mathematics',      dur: 30, type: 'practice', arT: 'تمارين تفاضل وتكامل', enT: 'Calculus drills', arSub: 'سؤال ١٢ نهايات', enSub: '12 problems · limits' },
+  { id: 5, subject: 'arabic_language',    dur: 15, type: 'audio',   arT: 'ملخص صوتي — النصوص الأدبية', enT: 'Audio summary — Arabic texts', arSub: 'بصوت خصوصي', enSub: "In 5sosy's voice" },
   { id: 6, subject: 'physics',   dur: 20, type: 'oral',    arT: 'تدريب شفهي — ترموديناميكا', enT: 'Oral practice — Thermodynamics', arSub: 'محاكاة لجنة', enSub: 'Examiner sim' }
 ];
 
@@ -13,7 +13,7 @@ export const WEAK_TOPICS: WeakTopic[] = [
   { id: 'gas-laws',    subject: 'physics',   arT: 'قوانين الغازات',  enT: 'Gas laws',            conf: 0.32 },
   { id: 'pv-nrt',      subject: 'physics',   arT: 'معادلة PV=nRT',   enT: 'PV = nRT',            conf: 0.28 },
   { id: 'titration',   subject: 'chemistry', arT: 'المعايرة الحمضية', enT: 'Acid-base titration', conf: 0.45 },
-  { id: 'derivatives', subject: 'math',      arT: 'قواعد الاشتقاق',   enT: 'Derivative rules',    conf: 0.58 },
+  { id: 'derivatives', subject: 'mathematics',      arT: 'قواعد الاشتقاق',   enT: 'Derivative rules',    conf: 0.58 },
   { id: 'french-camp', subject: 'history',   arT: 'الحملة الفرنسية',  enT: 'French campaign',     conf: 0.62 },
   { id: 'cell-resp',   subject: 'biology',   arT: 'التنفس الخلوي',    enT: 'Cellular respiration', conf: 0.71 }
 ];
@@ -21,7 +21,7 @@ export const WEAK_TOPICS: WeakTopic[] = [
 export const UPCOMING: UpcomingExam[] = [
   { id: 1, subject: 'physics',   arT: 'امتحان نصف الترم — فيزياء', enT: 'Mid-term — Physics', days: 2, urgent: true },
   { id: 2, subject: 'chemistry', arT: 'كويز — كيمياء عضوية',         enT: 'Quiz — Organic chem', days: 5, urgent: false },
-  { id: 3, subject: 'arabic',    arT: 'تسميع النصوص',                 enT: 'Arabic recitation',   days: 9, urgent: false }
+  { id: 3, subject: 'arabic_language',    arT: 'تسميع النصوص',                 enT: 'Arabic recitation',   days: 9, urgent: false }
 ];
 
 export const ACTIVITY: ActivityItem[] = [
@@ -153,7 +153,7 @@ export const BOOKS: Book[] = [
   },
   {
     id: 'math-calc-g12-moe',
-    subject: 'math',
+    subject: 'mathematics',
     arT: 'التفاضل والتكامل — الصف الثالث الثانوي',
     enT: 'Calculus — Grade 12',
     arSub: 'وزارة التربية والتعليم · ٢٠٢٥',
@@ -170,7 +170,7 @@ export const BOOKS: Book[] = [
   },
   {
     id: 'math-algebra-g12-moe',
-    subject: 'math',
+    subject: 'mathematics',
     arT: 'الجبر والهندسة الفراغية',
     enT: 'Algebra & Solid Geometry',
     arSub: 'وزارة التربية والتعليم · ٢٠٢٥',
@@ -187,7 +187,7 @@ export const BOOKS: Book[] = [
   },
   {
     id: 'ar-g12-moe',
-    subject: 'arabic',
+    subject: 'arabic_language',
     arT: 'اللغة العربية — الصف الثالث الثانوي',
     enT: 'Arabic — Grade 12',
     arSub: 'وزارة التربية والتعليم · ٢٠٢٥',
@@ -221,7 +221,7 @@ export const BOOKS: Book[] = [
   },
   {
     id: 'en-g12-moe',
-    subject: 'english',
+    subject: 'english_language',
     arT: 'اللغة الإنجليزية — الصف الثالث الثانوي',
     enT: 'English — Grade 12',
     arSub: 'وزارة التربية والتعليم · ٢٠٢٥',
@@ -255,7 +255,7 @@ export const BOOKS: Book[] = [
   },
   {
     id: 'phil-g12-moe',
-    subject: 'philosophy',
+    subject: 'philosophy_and_logic',
     arT: 'الفلسفة والمنطق — الصف الثالث الثانوي',
     enT: 'Philosophy & Logic — Grade 12',
     arSub: 'وزارة التربية والتعليم · ٢٠٢٥',
@@ -276,12 +276,12 @@ export const SUBJECT_PROGRESS: SubjectProgress[] = [
   { subject: 'physics',    mastery: 0.46, chaptersDone: 3, chaptersTotal: 7, books: 2, weakTopics: 4, minutesThisWeek: 184, lastTopicAr: 'قانون بويل',            lastTopicEn: "Boyle's Law" },
   { subject: 'chemistry',  mastery: 0.55, chaptersDone: 3, chaptersTotal: 6, books: 2, weakTopics: 2, minutesThisWeek: 142, lastTopicAr: 'المعايرة الحمضية',     lastTopicEn: 'Acid-base titration' },
   { subject: 'biology',    mastery: 0.71, chaptersDone: 4, chaptersTotal: 5, books: 1, weakTopics: 1, minutesThisWeek: 96,  lastTopicAr: 'التنفس الخلوي',         lastTopicEn: 'Cellular respiration' },
-  { subject: 'math',       mastery: 0.51, chaptersDone: 5, chaptersTotal: 11, books: 2, weakTopics: 3, minutesThisWeek: 220, lastTopicAr: 'قواعد الاشتقاق',         lastTopicEn: 'Derivative rules' },
-  { subject: 'arabic',     mastery: 0.78, chaptersDone: 3, chaptersTotal: 4, books: 1, weakTopics: 1, minutesThisWeek: 64,  lastTopicAr: 'النصوص الأدبية',         lastTopicEn: 'Literary texts' },
-  { subject: 'english',    mastery: 0.69, chaptersDone: 3, chaptersTotal: 5, books: 1, weakTopics: 1, minutesThisWeek: 58,  lastTopicAr: 'القواعد',                lastTopicEn: 'Grammar' },
+  { subject: 'mathematics',       mastery: 0.51, chaptersDone: 5, chaptersTotal: 11, books: 2, weakTopics: 3, minutesThisWeek: 220, lastTopicAr: 'قواعد الاشتقاق',         lastTopicEn: 'Derivative rules' },
+  { subject: 'arabic_language',     mastery: 0.78, chaptersDone: 3, chaptersTotal: 4, books: 1, weakTopics: 1, minutesThisWeek: 64,  lastTopicAr: 'النصوص الأدبية',         lastTopicEn: 'Literary texts' },
+  { subject: 'english_language',    mastery: 0.69, chaptersDone: 3, chaptersTotal: 5, books: 1, weakTopics: 1, minutesThisWeek: 58,  lastTopicAr: 'القواعد',                lastTopicEn: 'Grammar' },
   { subject: 'history',    mastery: 0.62, chaptersDone: 3, chaptersTotal: 6, books: 1, weakTopics: 2, minutesThisWeek: 72,  lastTopicAr: 'الحملة الفرنسية',         lastTopicEn: 'French campaign' },
   { subject: 'geography',  mastery: 0.40, chaptersDone: 2, chaptersTotal: 5, books: 1, weakTopics: 2, minutesThisWeek: 30,  lastTopicAr: 'الموارد المائية',         lastTopicEn: 'Water resources' },
-  { subject: 'philosophy', mastery: 0.55, chaptersDone: 2, chaptersTotal: 4, books: 1, weakTopics: 1, minutesThisWeek: 44,  lastTopicAr: 'المنطق الصوري',           lastTopicEn: 'Formal logic' }
+  { subject: 'philosophy_and_logic', mastery: 0.55, chaptersDone: 2, chaptersTotal: 4, books: 1, weakTopics: 1, minutesThisWeek: 44,  lastTopicAr: 'المنطق الصوري',           lastTopicEn: 'Formal logic' }
 ];
 
 export const WEEK_PLAN: WeekPlanDay[] = [
@@ -289,14 +289,14 @@ export const WEEK_PLAN: WeekPlanDay[] = [
     dayKey: 'sat', arLabel: 'السبت', enLabel: 'Sat', date: 16,
     blocks: [
       { id: 11, subject: 'physics',   dur: 30, type: 'review',  arT: 'مراجعة الفصل الثالث',          enT: 'Review Ch.3',                  arSub: 'الحركة الدورانية', enSub: 'Rotational motion' },
-      { id: 12, subject: 'arabic',    dur: 20, type: 'audio',   arT: 'ملخص صوتي — البلاغة',          enT: 'Audio — Rhetoric',             arSub: 'بصوت خصوصي',       enSub: "In 5sosy's voice" }
+      { id: 12, subject: 'arabic_language',    dur: 20, type: 'audio',   arT: 'ملخص صوتي — البلاغة',          enT: 'Audio — Rhetoric',             arSub: 'بصوت خصوصي',       enSub: "In 5sosy's voice" }
     ]
   },
   {
     dayKey: 'sun', arLabel: 'الأحد', enLabel: 'Sun', date: 17,
     blocks: [
       { id: 21, subject: 'chemistry', dur: 35, type: 'lesson',  arT: 'كيمياء عضوية — ج٢',           enT: 'Organic chem — Part 2',        arSub: 'فصل ٣',            enSub: 'Chapter 3' },
-      { id: 22, subject: 'math',      dur: 25, type: 'practice', arT: 'تمارين تفاضل',                enT: 'Differentiation drills',       arSub: '١٢ سؤال',          enSub: '12 problems' }
+      { id: 22, subject: 'mathematics',      dur: 25, type: 'practice', arT: 'تمارين تفاضل',                enT: 'Differentiation drills',       arSub: '١٢ سؤال',          enSub: '12 problems' }
     ]
   },
   {
@@ -314,8 +314,8 @@ export const WEEK_PLAN: WeekPlanDay[] = [
   {
     dayKey: 'wed', arLabel: 'الأربعاء', enLabel: 'Wed', date: 20,
     blocks: [
-      { id: 41, subject: 'english',   dur: 20, type: 'practice', arT: 'تمارين قواعد',                enT: 'Grammar drills',               arSub: 'الأزمنة',          enSub: 'Tenses' },
-      { id: 42, subject: 'philosophy',dur: 20, type: 'lesson',  arT: 'المنطق الصوري',                enT: 'Formal logic',                 arSub: 'مدخل',             enSub: 'Intro' }
+      { id: 41, subject: 'english_language',   dur: 20, type: 'practice', arT: 'تمارين قواعد',                enT: 'Grammar drills',               arSub: 'الأزمنة',          enSub: 'Tenses' },
+      { id: 42, subject: 'philosophy_and_logic',dur: 20, type: 'lesson',  arT: 'المنطق الصوري',                enT: 'Formal logic',                 arSub: 'مدخل',             enSub: 'Intro' }
     ]
   },
   {

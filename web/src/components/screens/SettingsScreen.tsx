@@ -55,7 +55,7 @@ export default function SettingsScreen() {
             {[
               { id: 'physics' as const,   indexed: true,  when: isAR ? 'منذ ١٢ يوم' : '12 days ago' },
               { id: 'chemistry' as const, indexed: true,  when: isAR ? 'منذ ٨ أيام'  : '8 days ago' },
-              { id: 'math' as const,      indexed: false, when: isAR ? 'لم تتم الفهرسة' : 'not yet indexed' }
+              { id: 'mathematics' as const, indexed: false, when: isAR ? 'لم تتم الفهرسة' : 'not yet indexed' }
             ].map((b) => {
               const m = metaFor(b.id);
               return (
