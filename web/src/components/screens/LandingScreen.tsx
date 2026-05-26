@@ -127,14 +127,23 @@ export default function LandingScreen() {
           <p className="mt-5 text-[17px] sm:text-[18px] leading-relaxed text-slate-600 max-w-xl mx-auto lg:mx-0">{L.heroSubtitle}</p>
 
           <div className="mt-8 flex flex-wrap gap-3 justify-center lg:justify-start">
-            <button onClick={handleAuth('google')} disabled={busy !== null}
-              className="inline-flex items-center gap-2.5 bg-white hover:bg-slate-50 text-slate-900 border border-slate-200 font-bold text-[15px] px-6 py-3.5 rounded-2xl transition shadow-lg shadow-slate-900/5 disabled:opacity-60">
-              {busy === 'google' ? <Spinner dark /> : <GoogleIcon />} {t.auth.google}
-            </button>
-            <button onClick={handleAuth('guest')} disabled={busy !== null}
-              className="inline-flex items-center gap-2.5 bg-gradient-to-r from-blue-600 to-orange-500 hover:from-blue-700 hover:to-orange-600 text-white font-bold text-[15px] px-6 py-3.5 rounded-2xl transition shadow-lg shadow-blue-600/25 disabled:opacity-60">
-              {busy === 'guest' ? <Spinner /> : <span>👤</span>} {t.auth.anon}
-            </button>
+            {user ? (
+              <button onClick={() => router.push(`/${locale}/home`)}
+                className="inline-flex items-center gap-2.5 bg-gradient-to-r from-blue-600 to-orange-500 hover:from-blue-700 hover:to-orange-600 text-white font-bold text-[15px] px-7 py-3.5 rounded-2xl transition shadow-lg shadow-blue-600/25">
+                {L.dashboard} →
+              </button>
+            ) : (
+              <>
+                <button onClick={handleAuth('google')} disabled={busy !== null}
+                  className="inline-flex items-center gap-2.5 bg-white hover:bg-slate-50 text-slate-900 border border-slate-200 font-bold text-[15px] px-6 py-3.5 rounded-2xl transition shadow-lg shadow-slate-900/5 disabled:opacity-60">
+                  {busy === 'google' ? <Spinner dark /> : <GoogleIcon />} {t.auth.google}
+                </button>
+                <button onClick={handleAuth('guest')} disabled={busy !== null}
+                  className="inline-flex items-center gap-2.5 bg-gradient-to-r from-blue-600 to-orange-500 hover:from-blue-700 hover:to-orange-600 text-white font-bold text-[15px] px-6 py-3.5 rounded-2xl transition shadow-lg shadow-blue-600/25 disabled:opacity-60">
+                  {busy === 'guest' ? <Spinner /> : <span>👤</span>} {t.auth.anon}
+                </button>
+              </>
+            )}
           </div>
           {authError && <div className="mt-4 text-[12.5px] text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 inline-block">{authError}</div>}
 
@@ -219,14 +228,23 @@ export default function LandingScreen() {
               ))}
             </div>
             <div className="mt-9 flex flex-wrap gap-3 justify-center">
-              <button onClick={handleAuth('google')} disabled={busy !== null}
-                className="inline-flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-900 border border-slate-200 font-bold text-[14px] px-5 py-3 rounded-2xl transition shadow disabled:opacity-60">
-                {busy === 'google' ? <Spinner dark /> : <GoogleIcon />} {t.auth.google}
-              </button>
-              <button onClick={handleAuth('guest')} disabled={busy !== null}
-                className="inline-flex items-center gap-2 bg-gradient-to-r from-blue-600 to-orange-500 text-white font-bold text-[14px] px-5 py-3 rounded-2xl transition shadow-lg shadow-blue-600/25 disabled:opacity-60">
-                {busy === 'guest' ? <Spinner /> : <span>👤</span>} {t.auth.anon}
-              </button>
+              {user ? (
+                <button onClick={() => router.push(`/${locale}/home`)}
+                  className="inline-flex items-center gap-2 bg-gradient-to-r from-blue-600 to-orange-500 text-white font-bold text-[14px] px-6 py-3 rounded-2xl transition shadow-lg shadow-blue-600/25">
+                  {L.dashboard} →
+                </button>
+              ) : (
+                <>
+                  <button onClick={handleAuth('google')} disabled={busy !== null}
+                    className="inline-flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-900 border border-slate-200 font-bold text-[14px] px-5 py-3 rounded-2xl transition shadow disabled:opacity-60">
+                    {busy === 'google' ? <Spinner dark /> : <GoogleIcon />} {t.auth.google}
+                  </button>
+                  <button onClick={handleAuth('guest')} disabled={busy !== null}
+                    className="inline-flex items-center gap-2 bg-gradient-to-r from-blue-600 to-orange-500 text-white font-bold text-[14px] px-5 py-3 rounded-2xl transition shadow-lg shadow-blue-600/25 disabled:opacity-60">
+                    {busy === 'guest' ? <Spinner /> : <span>👤</span>} {t.auth.anon}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

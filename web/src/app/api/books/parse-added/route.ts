@@ -38,6 +38,7 @@ export async function POST(req: Request) {
       await db.collection('books').doc(bookId).set({
         id: bookId,
         ...meta,
+        gcsUri: gcsUri || '',
         createdAt: FieldValue.serverTimestamp(),
       });
     }

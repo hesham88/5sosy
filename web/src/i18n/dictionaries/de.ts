@@ -161,7 +161,21 @@ const dict = {
     mindMap: 'Mindmap',
     mindMapTitle: 'Mindmap des Buches',
     mindMapGenerating: 'Mindmap wird erstellt…',
-    mindMapEmpty: 'Für dieses Buch konnte keine Mindmap erstellt werden.'
+    mindMapEmpty: 'Für dieses Buch konnte keine Mindmap erstellt werden.',
+    searchEverything: 'Durchsuche Buchseiten — ein Stichwort oder eine Frage…',
+    searchInsideBook: 'In diesem Buch suchen — ein Wort oder eine Frage…',
+    smartSearch: 'Intelligente Suche',
+    smartSearchResults: 'Suchergebnisse',
+    matchesFor: 'Treffer für',
+    didYouMean: 'Meinten Sie',
+    processingSearch: 'Die KI durchsucht alle Seiten…',
+    noMatchingPages: 'Keine passenden Seiten gefunden.',
+    noMatchingPagesShort: 'Keine passenden Seiten.',
+    match: 'Treffer',
+    page: 'Seite',
+    pageOf: 'von',
+    clearSearch: 'Suche löschen',
+    backToTop: 'Nach oben'
   },
   common: {
     loading: 'Lädt…',

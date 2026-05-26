@@ -161,7 +161,21 @@ const dict = {
     mindMap: '思维导图',
     mindMapTitle: '书籍思维导图',
     mindMapGenerating: '正在生成思维导图…',
-    mindMapEmpty: '无法为这本书生成思维导图。'
+    mindMapEmpty: '无法为这本书生成思维导图。',
+    searchEverything: '在书页中搜索任意内容——关键词或问题…',
+    searchInsideBook: '在本书中搜索——一个词或问题…',
+    smartSearch: '智能搜索',
+    smartSearchResults: '智能搜索结果',
+    matchesFor: '匹配',
+    didYouMean: '您是否想找',
+    processingSearch: 'AI 正在检索所有页面…',
+    noMatchingPages: '未在任何教材中找到匹配的页面。',
+    noMatchingPagesShort: '没有匹配的页面。',
+    match: '匹配度',
+    page: '第',
+    pageOf: '/',
+    clearSearch: '清除搜索',
+    backToTop: '返回顶部'
   },
   common: {
     loading: '加载中…',

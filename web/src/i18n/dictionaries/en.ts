@@ -161,7 +161,21 @@ const dict = {
     mindMap: 'Mind map',
     mindMapTitle: 'Book mind map',
     mindMapGenerating: 'Building the mind map…',
-    mindMapEmpty: 'Could not generate a mind map for this book.'
+    mindMapEmpty: 'Could not generate a mind map for this book.',
+    searchEverything: 'Search anything inside book pages — a keyword or a question…',
+    searchInsideBook: 'Search inside this book — a word or a question…',
+    smartSearch: 'Smart Search',
+    smartSearchResults: 'Smart Search Results',
+    matchesFor: 'Matches for',
+    didYouMean: 'Did you mean',
+    processingSearch: 'AI is searching across all pages…',
+    noMatchingPages: 'No matching pages found in any textbook.',
+    noMatchingPagesShort: 'No matching pages.',
+    match: 'Match',
+    page: 'Page',
+    pageOf: 'of',
+    clearSearch: 'Clear search',
+    backToTop: 'Back to top'
   },
   common: {
     loading: 'Loading…',

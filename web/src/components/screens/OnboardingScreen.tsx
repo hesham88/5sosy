@@ -263,10 +263,15 @@ export default function OnboardingScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  // Auto-scroll the chat as messages arrive.
+  // Auto-scroll the chat to the newest message. Defer to the next frame so the
+  // freshly-appended bubble is laid out before we measure scrollHeight —
+  // otherwise we'd scroll to the stale (pre-append) bottom, which reads as "top".
   useEffect(() => {
-    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
-  }, [messages, pending, currentStep]);
+    const el = listRef.current;
+    if (!el) return;
+    const raf = requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+    return () => cancelAnimationFrame(raf);
+  }, [messages, pending, currentStep, finishing]);
 
   const progress = useMemo(() => {
     const totalKeys = [
@@ -424,12 +429,21 @@ function TextInput({
   disabled: boolean;
 }) {
   const [v, setV] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+  // Keep the cursor in the box: focus on mount and refocus each time the turn
+  // finishes (disabled flips back to false), so the user can keep typing
+  // without clicking back in after every reply.
+  useEffect(() => {
+    if (!disabled) inputRef.current?.focus();
+  }, [disabled]);
   return (
     <form
       onSubmit={(e) => { e.preventDefault(); if (!v.trim() || disabled) return; onSubmit(v.trim()); setV(''); }}
       className="flex items-center gap-2"
     >
       <input
+        ref={inputRef}
+        autoFocus
         value={v}
         onChange={(e) => setV(e.target.value)}
         placeholder={placeholder}
@@ -453,6 +467,10 @@ function NumberInput({
   disabled: boolean;
 }) {
   const [v, setV] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!disabled) inputRef.current?.focus();
+  }, [disabled]);
   return (
     <form
       onSubmit={(e) => {
@@ -465,6 +483,8 @@ function NumberInput({
       className="flex items-center gap-2"
     >
       <input
+        ref={inputRef}
+        autoFocus
         type="number"
         inputMode="numeric"
         value={v}

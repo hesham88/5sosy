@@ -159,7 +159,21 @@ const dict = {
     mindMap: 'خريطة ذهنية',
     mindMapTitle: 'الخريطة الذهنية للكتاب',
     mindMapGenerating: 'بجهّز الخريطة الذهنية…',
-    mindMapEmpty: 'تعذّر إنشاء خريطة ذهنية لهذا الكتاب.'
+    mindMapEmpty: 'تعذّر إنشاء خريطة ذهنية لهذا الكتاب.',
+    searchEverything: 'ابحث بأي كلمة أو سؤال داخل صفحات الكتب…',
+    searchInsideBook: 'ابحث داخل الكتاب — كلمة أو سؤال…',
+    smartSearch: 'بحث ذكي',
+    smartSearchResults: 'نتائج البحث الذكي',
+    matchesFor: 'نتائج البحث عن',
+    didYouMean: 'هل تقصد',
+    processingSearch: 'يقوم الذكاء الاصطناعي بفحص محتوى الكتب…',
+    noMatchingPages: 'لم يتم العثور على صفحات مطابقة.',
+    noMatchingPagesShort: 'لا توجد نتائج مطابقة.',
+    match: 'صلة',
+    page: 'صفحة',
+    pageOf: 'من',
+    clearSearch: 'مسح البحث',
+    backToTop: 'العودة للأعلى'
   },
   common: {
     loading: 'بيحمّل…',

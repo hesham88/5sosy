@@ -161,7 +161,21 @@ const dict = {
     mindMap: 'Mapa mental',
     mindMapTitle: 'Mapa mental del libro',
     mindMapGenerating: 'Creando el mapa mental…',
-    mindMapEmpty: 'No se pudo generar un mapa mental para este libro.'
+    mindMapEmpty: 'No se pudo generar un mapa mental para este libro.',
+    searchEverything: 'Busca cualquier cosa en las páginas — una palabra o una pregunta…',
+    searchInsideBook: 'Buscar en este libro — una palabra o una pregunta…',
+    smartSearch: 'Búsqueda inteligente',
+    smartSearchResults: 'Resultados de búsqueda',
+    matchesFor: 'Resultados para',
+    didYouMean: '¿Quiso decir',
+    processingSearch: 'La IA está analizando todas las páginas…',
+    noMatchingPages: 'No se encontraron páginas coincidentes.',
+    noMatchingPagesShort: 'Sin páginas coincidentes.',
+    match: 'Coincidencia',
+    page: 'Página',
+    pageOf: 'de',
+    clearSearch: 'Borrar búsqueda',
+    backToTop: 'Volver arriba'
   },
   common: {
     loading: 'Cargando…',

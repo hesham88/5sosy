@@ -63,6 +63,31 @@ function parseYouTube(url: string): { embedUrl: string | null; isPlaylist: boole
   return { embedUrl: null, isPlaylist: false, videoId: null, listId: null };
 }
 
+// Floating "back to top" — the catalog can run very long (1500+ books, paged).
+// The page itself is the scroll container (ChromeLayout uses normal document
+// flow), so we scroll the window.
+function BackToTop({ label }: { label: string }) {
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setShow(window.scrollY > 700);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+  if (!show) return null;
+  return (
+    <button
+      onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+      title={label}
+      aria-label={label}
+      className="fixed bottom-6 start-6 z-40 inline-flex items-center gap-1.5 rounded-full bg-slate-900/90 hover:bg-slate-900 text-white text-[12px] font-bold px-4 py-2.5 shadow-lg backdrop-blur transition"
+    >
+      <span aria-hidden>↑</span>
+      <span className="hidden sm:inline">{label}</span>
+    </button>
+  );
+}
+
 export default function BooksScreen() {
   const { isAR, t, locale } = useApp();
   const { user } = useAuth();
@@ -681,7 +706,11 @@ export default function BooksScreen() {
         },
         body: JSON.stringify({ bookId }),
       });
-      if (!res.ok) {
+      if (res.ok) {
+        // Optimistically drop it from the grid; the catalog poll (mongodb) or
+        // snapshot (firestore) confirms shortly after.
+        setDbBooks((prev) => prev.filter((b) => b.id !== bookId));
+      } else {
         const data = await res.json().catch(() => ({}));
         console.error('Delete failed:', data);
         alert(
@@ -690,11 +719,13 @@ export default function BooksScreen() {
       }
     } catch (err) {
       console.error('Failed to delete book:', err);
+      alert(isAR ? 'تعذّر الاتصال بخدمة الحذف.' : 'Could not reach the delete service.');
     }
   };
 
   return (
     <ChromeLayout>
+      <BackToTop label={t.books.backToTop} />
       <div className="px-4 lg:px-8 py-6 max-w-[1500px] mx-auto">
         {/* Header Hero banner */}
         <div className="mb-6 rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
@@ -728,14 +759,14 @@ export default function BooksScreen() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleVectorSearch()}
-                placeholder={isAR ? 'ابحث بأي كلمة أو سؤال داخل صفحات الكتب…' : 'Search anything inside book pages — a keyword or a question…'}
+                placeholder={t.books.searchEverything}
                 className="flex-1 bg-transparent border-none text-[13.5px] text-slate-800 focus:outline-none py-1.5 min-w-0"
               />
               <button
                 onClick={() => handleVectorSearch()}
                 className="bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-[12.5px] px-4 py-2 rounded-lg transition shadow-sm whitespace-nowrap"
               >
-                {isAR ? 'بحث ذكي' : 'Smart Search'}
+                {t.books.smartSearch}
               </button>
             </div>
           </div>
@@ -1343,10 +1374,10 @@ export default function BooksScreen() {
             <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
               <div>
                 <h3 className="text-[17px] font-extrabold text-slate-900 flex items-center gap-2">
-                  <span>🧠</span> {isAR ? 'نتائج البحث الذكي' : 'Smart Search Results'}
+                  <span>🧠</span> {t.books.smartSearchResults}
                 </h3>
                 <p className="text-[12px] text-slate-500 mt-0.5">
-                  {isAR ? `نتائج البحث عن: "${searchQuery}"` : `Matches for: "${searchQuery}"`}
+                  {t.books.matchesFor}: &quot;{searchQuery}&quot;
                 </p>
               </div>
               <button
@@ -1360,7 +1391,7 @@ export default function BooksScreen() {
             <div className="flex-1 overflow-y-auto space-y-4 pr-1 slim">
               {searchSuggestion && !searchLoading && (
                 <div className="text-[13px] text-slate-600 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5">
-                  {isAR ? 'هل تقصد:' : 'Did you mean:'}{' '}
+                  {t.books.didYouMean}{' '}
                   <button
                     onClick={() => handleVectorSearch(searchSuggestion)}
                     className="font-bold text-amber-700 hover:underline"
@@ -1373,11 +1404,11 @@ export default function BooksScreen() {
               {searchLoading ? (
                 <div className="space-y-4 py-12">
                   <div className="flex justify-center"><div className="w-8 h-8 border-4 border-sky-600 border-t-transparent rounded-full animate-spin"></div></div>
-                  <p className="text-center text-slate-500 text-[13px]">{isAR ? 'جاري تحليل وفحص محتوى الكتب بالذكاء الاصطناعي...' : 'AI is processing similarity rankings across all pages...'}</p>
+                  <p className="text-center text-slate-500 text-[13px]">{t.books.processingSearch}</p>
                 </div>
               ) : searchResults.length === 0 ? (
                 <div className="text-center py-12 text-slate-400 italic">
-                  {isAR ? 'لم يتم العثور على صفحات مطابقة للبحث' : 'No matching pages found in any textbook.'}
+                  {t.books.noMatchingPages}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1393,7 +1424,7 @@ export default function BooksScreen() {
                       <div className="flex items-center justify-between mb-2">
                         <span className="font-extrabold text-[13.5px] text-slate-950 truncate max-w-[70%]">{(isAR ? res.bookTitleAr : res.bookTitleEn) || res.bookTitle}</span>
                         <span className="text-[11px] bg-sky-50 text-sky-700 font-bold px-2 py-0.5 rounded-lg">
-                          {isAR ? 'صلة' : 'Match'}: {Math.min(100, Math.round((res.score || 0) * 100))}%
+                          {t.books.match}: {Math.min(100, Math.round((res.score || 0) * 100))}%
                         </span>
                       </div>
                       
@@ -1403,7 +1434,7 @@ export default function BooksScreen() {
 
                       <div className="flex items-center justify-between text-[11px] text-slate-400">
                         <span>{res.grade} · {res.subject}</span>
-                        <span className="font-bold text-sky-600">{isAR ? `صفحة ${res.pageNumber}` : `Page ${res.pageNumber}`} ➔</span>
+                        <span className="font-bold text-sky-600">{t.books.page} {res.pageNumber} ➔</span>
                       </div>
                     </div>
                   ))}

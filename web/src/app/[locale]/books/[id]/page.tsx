@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useEffect, useState, useMemo } from 'react';
+import { use, useEffect, useRef, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { collection, doc, getDoc, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { getFirebase } from '@/lib/firebase/client';
@@ -80,12 +80,22 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
   const [chatMsgs, setChatMsgs] = useState<{ who: 'me' | '5sosy'; text: string; citations?: { pageNumber: number }[] }[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatSession, setChatSession] = useState<string | null>(null);
+  const chatListRef = useRef<HTMLDivElement | null>(null);
 
   // Search inside book state
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchSuggestion, setSearchSuggestion] = useState<string | null>(null);
+
+  // Deep-link: open the page referenced by ?page=N (e.g. arriving from a
+  // global search result). Runs once on mount; in-book navigation uses
+  // setCurrentPageNum directly so it doesn't depend on the URL.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const p = parseInt(new URLSearchParams(window.location.search).get('page') || '', 10);
+    if (Number.isFinite(p) && p > 0) setCurrentPageNum(p);
+  }, []);
 
   // Mind map state (session-scoped; generated on demand)
   const [mindmapOpen, setMindmapOpen] = useState(false);
@@ -285,6 +295,22 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
     }
   };
 
+  // Keep the tutor chat pinned to the newest message after each turn.
+  useEffect(() => {
+    const el = chatListRef.current;
+    if (!el) return;
+    const raf = requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+    return () => cancelAnimationFrame(raf);
+  }, [chatMsgs, chatLoading]);
+
+  // Explicit clear — the search (query + results) otherwise persists so the
+  // user can jump between several matched pages without re-searching.
+  const clearLocalSearch = () => {
+    setSearchQuery('');
+    setSearchResults([]);
+    setSearchSuggestion(null);
+  };
+
   // Handle chatbot messaging
   const sendChatMessage = async () => {
     if (!chatInput.trim()) return;
@@ -362,7 +388,7 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
             <p className="text-[12px] text-slate-500">{isAR ? book.arSub : book.enSub}</p>
             <div className="flex justify-between items-center text-[11px] text-slate-400 border-t border-slate-100 pt-3">
               <span>{book.pages} {t.books.pages}</span>
-              <span>Year {book.year}</span>
+              <span>{t.books.year} {book.year}</span>
             </div>
           </Card>
 
@@ -400,19 +426,29 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleLocalSearch()}
-                placeholder={isAR ? 'ابحث داخل الكتاب — كلمة أو سؤال…' : 'Search inside this book — a word or a question…'}
+                placeholder={t.books.searchInsideBook}
                 className="flex-1 bg-transparent border-none text-[13px] focus:outline-none p-1.5 min-w-0"
               />
+              {(searchQuery !== '' || searchResults.length > 0) && (
+                <button
+                  onClick={clearLocalSearch}
+                  title={t.books.clearSearch}
+                  aria-label={t.books.clearSearch}
+                  className="w-7 h-7 shrink-0 grid place-items-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200/70 transition"
+                >
+                  ✕
+                </button>
+              )}
               <button
                 onClick={() => handleLocalSearch()}
                 className="bg-sky-600 hover:bg-sky-700 text-white text-[12px] font-bold px-4 py-1.5 rounded-lg whitespace-nowrap"
               >
-                {isAR ? 'بحث ذكي' : 'Smart Search'}
+                {t.books.smartSearch}
               </button>
             </div>
             {searchSuggestion && !searchLoading && (
               <div className="text-[11.5px] text-slate-600 mt-1.5">
-                {isAR ? 'هل تقصد:' : 'Did you mean:'}{' '}
+                {t.books.didYouMean}{' '}
                 <button onClick={() => handleLocalSearch(searchSuggestion)} className="font-bold text-amber-600 hover:underline">
                   {searchSuggestion}
                 </button>
@@ -423,22 +459,27 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
               <div className="text-center py-3"><div className="w-5 h-5 border-2 border-sky-600 border-t-transparent rounded-full animate-spin mx-auto" /></div>
             ) : searchResults.length > 0 ? (
               <div className="absolute z-20 left-4 right-4 lg:left-6 lg:right-6 mt-2 max-h-[280px] overflow-y-auto space-y-2 slim bg-white border border-slate-200 rounded-xl shadow-lg p-2">
-                {searchResults.map((res: any, idx: number) => (
-                  <button
-                    key={idx}
-                    onClick={() => { setCurrentPageNum(res.pageNumber); setSearchResults([]); }}
-                    className="w-full p-2.5 border border-slate-100 rounded-lg hover:bg-sky-50 transition cursor-pointer text-start"
-                  >
-                    <div className="flex justify-between items-center text-[10.5px] text-slate-400 mb-1">
-                      <span className="font-bold text-sky-600">{isAR ? `صفحة ${res.pageNumber}` : `Page ${res.pageNumber}`} ↗</span>
-                      <span>{Math.min(100, Math.round((res.score || 0) * 100))}%</span>
-                    </div>
-                    <p className="text-[11.5px] text-slate-600 line-clamp-2 leading-relaxed">{res.text}</p>
-                  </button>
-                ))}
+                {searchResults.map((res: any, idx: number) => {
+                  const active = res.pageNumber === currentPageNum;
+                  return (
+                    <button
+                      key={idx}
+                      onClick={() => setCurrentPageNum(res.pageNumber)}
+                      className={`w-full p-2.5 border rounded-lg transition cursor-pointer text-start ${
+                        active ? 'border-sky-400 bg-sky-50 ring-1 ring-sky-300' : 'border-slate-100 hover:bg-sky-50'
+                      }`}
+                    >
+                      <div className="flex justify-between items-center text-[10.5px] text-slate-400 mb-1">
+                        <span className="font-bold text-sky-600">{t.books.page} {res.pageNumber} ↗</span>
+                        <span>{Math.min(100, Math.round((res.score || 0) * 100))}%</span>
+                      </div>
+                      <p className="text-[11.5px] text-slate-600 line-clamp-2 leading-relaxed">{res.text}</p>
+                    </button>
+                  );
+                })}
               </div>
             ) : searchQuery.trim() !== '' && (
-              <div className="text-[11px] text-slate-400 italic text-center py-2">{isAR ? 'لا توجد نتائج مطابقة.' : 'No matching pages.'}</div>
+              <div className="text-[11px] text-slate-400 italic text-center py-2">{t.books.noMatchingPagesShort}</div>
             )}
           </div>
           {/* Header */}
@@ -446,7 +487,7 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
             <div className="flex items-center gap-2">
               <span className="text-xl">{subjectMeta.glyph}</span>
               <span className="font-extrabold text-[15px] text-slate-900">
-                {isAR ? `صفحة ${currentPageNum} من ${pageCount}` : `Page ${currentPageNum} of ${pageCount}`}
+                {t.books.page} {currentPageNum} {t.books.pageOf} {pageCount}
               </span>
             </div>
 
@@ -548,7 +589,7 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
           </div>
 
           {/* Chat Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 slim">
+          <div ref={chatListRef} className="flex-1 overflow-y-auto p-4 space-y-3 slim">
             {chatMsgs.length === 0 && (
               <div className="text-center py-12 text-slate-500 text-[12px] italic">
                 {isAR ? 'ابدأ بطرح سؤال حول المحتوى المعروض (مثال: اشرح الفقرة الثانية)' : 'Ask a question about the text (e.g. explain the formulas on this page)'}
@@ -569,7 +610,7 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
                             onClick={() => setCurrentPageNum(pn as number)}
                             className="text-[10.5px] font-bold bg-sky-500/20 text-sky-300 hover:bg-sky-500/30 rounded-md px-2 py-0.5 transition"
                           >
-                            {isAR ? `صفحة ${pn}` : `Page ${pn}`} ↗
+                            {t.books.page} {pn} ↗
                           </button>
                         ))}
                       </div>
@@ -652,7 +693,7 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
                       depth={0}
                       branch={0}
                       onJump={jumpToPage}
-                      pageLabel={(n) => (isAR ? `صفحة ${n}` : `Page ${n}`)}
+                      pageLabel={(n) => `${t.books.page} ${n}`}
                     />
                   </ul>
                 </>

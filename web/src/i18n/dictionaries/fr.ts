@@ -161,7 +161,21 @@ const dict = {
     mindMap: 'Carte mentale',
     mindMapTitle: 'Carte mentale du livre',
     mindMapGenerating: 'Création de la carte mentale…',
-    mindMapEmpty: 'Impossible de générer une carte mentale pour ce livre.'
+    mindMapEmpty: 'Impossible de générer une carte mentale pour ce livre.',
+    searchEverything: 'Recherchez n\'importe quoi dans les pages — un mot-clé ou une question…',
+    searchInsideBook: 'Rechercher dans ce livre — un mot ou une question…',
+    smartSearch: 'Recherche intelligente',
+    smartSearchResults: 'Résultats de recherche',
+    matchesFor: 'Résultats pour',
+    didYouMean: 'Vouliez-vous dire',
+    processingSearch: 'L\'IA analyse toutes les pages…',
+    noMatchingPages: 'Aucune page correspondante trouvée.',
+    noMatchingPagesShort: 'Aucune page correspondante.',
+    match: 'Pertinence',
+    page: 'Page',
+    pageOf: 'sur',
+    clearSearch: 'Effacer la recherche',
+    backToTop: 'Haut de page'
   },
   common: {
     loading: 'Chargement…',

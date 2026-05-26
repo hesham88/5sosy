@@ -285,9 +285,14 @@ export function FiveSosyBot() {
   const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
 
+  // Keep the newest message in view. Defer to the next frame so the streamed
+  // content is laid out before we measure scrollHeight.
   useEffect(() => {
-    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
-  }, [messages, open]);
+    const el = listRef.current;
+    if (!el) return;
+    const raf = requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+    return () => cancelAnimationFrame(raf);
+  }, [messages, busy, open]);
 
   useEffect(() => {
     return () => abortRef.current?.abort();

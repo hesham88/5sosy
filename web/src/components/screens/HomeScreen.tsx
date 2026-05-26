@@ -11,6 +11,18 @@ import { callAgent } from '@/lib/agents';
 import { useProfile } from '@/lib/firebase/use-profile';
 import { dirFor } from '@/i18n/config';
 
+// Defensive: if a malformed value like "my name is Hisham" was ever stored,
+// strip the common self-introduction lead-in so the greeting never shows
+// "Hi my". The real extraction fix lives in the onboarding agent.
+function firstNameFrom(raw?: string | null): string {
+  if (!raw) return '';
+  const s = raw
+    .trim()
+    .replace(/^(my name is|i am|i'm|im|call me|name is|اسمي|إسمي|انا|أنا)\s+/i, '');
+  const first = s.split(/\s+/)[0] || '';
+  return first.replace(/[^\p{L}\p{N}'-]/gu, '');
+}
+
 export default function HomeScreen() {
   const { isAR, t, locale, pulseStreak } = useApp();
   const router = useRouter();
@@ -19,7 +31,7 @@ export default function HomeScreen() {
   const [parsing, setParsing] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const firstName = (profile?.preferredName || profile?.displayName || '').split(' ')[0];
+  const firstName = firstNameFrom(profile?.preferredName || profile?.displayName);
   const greeting = firstName
     ? isAR ? `أهلاً ${firstName} 👋` : `Hi ${firstName} 👋`
     : t.home.greet;
