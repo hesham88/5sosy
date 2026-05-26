@@ -77,11 +77,15 @@ export type Book = {
   enType?: string;
   arSubject?: string;
   enSubject?: string;
-  // Pre-translated title/subtitle per locale (ar/en/fr/de/es/it/zh), written by
+  // Pre-translated metadata per locale (ar/en/fr/de/es/it/zh), written by
   // scripts/translate_book_metadata.py. Absent until that batch runs; consumers
-  // fall back to arT/enT.
+  // fall back to the ar/en fields.
   titleI18n?: Record<string, string>;
   subI18n?: Record<string, string>;
+  typeI18n?: Record<string, string>;
+  gradeI18n?: Record<string, string>;
+  termI18n?: Record<string, string>;
+  stageI18n?: Record<string, string>;
 };
 
 export type SubjectProgress = {

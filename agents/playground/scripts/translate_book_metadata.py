@@ -1,27 +1,26 @@
-"""Pre-translate book metadata (title + subtitle) into all 7 UI locales and
-store it on each book doc as `titleI18n` / `subI18n`.
+"""Pre-translate book metadata into all 7 UI locales and store per-field i18n
+maps on each book doc: titleI18n, typeI18n, gradeI18n, termI18n, stageI18n.
 
 Why
 ---
-Book metadata is stored only as ar/en pairs (arT/enT, arSub/enSub), so a
-French/German/… UI shows English (or Arabic) titles. The web reads
-`titleI18n[locale]` / `subI18n[locale]` when present (see web/src/lib/books.ts
-bookTitle/bookSubtitle), falling back to ar/en otherwise. This batch fills those
-fields once so the catalog reads in the user's language with no per-view cost.
+Book metadata (title, type, grade, term, stage) is stored only in Arabic
+(the en* fields are Arabic placeholders), so a French/German/… UI shows Arabic
+labels. The web reads `<field>I18n[locale]` when present (web/src/lib/books.ts),
+falling back to ar/en otherwise. This batch fills those maps once so the catalog
+reads in the user's language with no per-view cost.
 
-This is a standalone maintenance script (NOT wired into ingestion). It batches
-~50 books per Gemini call (gemini-3.1-flash-lite), so the whole ~1500-book
-catalog is ~30 calls (≈$0.10). Run it deliberately.
+Standalone maintenance script (NOT wired into ingestion). Batches ~25 books per
+Gemini call (gemini-3.1-flash-lite); ~60 calls for the ~1500-book catalog
+(≈$0.20). Run deliberately.
 
 Usage (from agents/playground, venv active)
 -------------------------------------------
     python -m scripts.translate_book_metadata --dry-run --limit 5
-    python -m scripts.translate_book_metadata --batch-size 50
+    python -m scripts.translate_book_metadata --batch-size 25
     python -m scripts.translate_book_metadata --book <bookId> --force
-    python -m scripts.translate_book_metadata            # whole catalog
 
-Flags: --limit N, --batch-size N (default 50), --book ID, --force, --dry-run.
-Idempotent: skips locales already populated unless --force.
+Flags: --limit N, --batch-size N (default 25), --book ID, --force, --dry-run.
+Idempotent: skips field-maps already complete unless --force.
 """
 from __future__ import annotations
 
@@ -42,15 +41,24 @@ LOCALE_NAMES = {
 }
 MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
+# (logical field, stored i18n map field, ar source keys, en source keys, raw key,
+#  en_is_real). en_is_real=True only for title — the other en* fields hold Arabic
+#  placeholders, so we never seed `en` from them; the model produces real English.
+FIELDS = [
+    ("title", "titleI18n", ["arT", "arTitle"], ["enT", "enTitle"], "title", True),
+    ("type", "typeI18n", ["arType"], ["enType"], "type", False),
+    ("grade", "gradeI18n", ["arGrade"], ["enGrade"], "grade", False),
+    ("term", "termI18n", ["arTerm"], ["enTerm"], "term", False),
+    ("stage", "stageI18n", ["arStage"], ["enStage"], "stage", False),
+]
 
-def _base(doc: dict) -> tuple[str, str, str]:
-    """Pick the base title/subtitle and the locale they're written in."""
-    en_t = (doc.get("enT") or doc.get("enTitle") or "").strip()
-    ar_t = (doc.get("arT") or doc.get("arTitle") or "").strip()
-    title = en_t or ar_t or (doc.get("title") or "").strip()
-    base_loc = "en" if en_t else "ar"
-    sub = (doc.get("enSub") if base_loc == "en" else doc.get("arSub")) or doc.get("arSub") or doc.get("enSub") or ""
-    return title, str(sub).strip(), base_loc
+
+def _first(doc: dict, keys: list[str]) -> str:
+    for k in keys:
+        v = (doc.get(k) or "").strip() if isinstance(doc.get(k), str) else ""
+        if v:
+            return v
+    return ""
 
 
 def _strip_surrogates(s: str) -> str:
@@ -69,22 +77,19 @@ def _loads(raw: str) -> dict:
 
 
 def translate_batch(client: genai.Client, items: list[dict]) -> dict:
-    """One Gemini call for up to N books.
-
-    items: [{"id": str, "title": str, "subtitle": str, "base": "ar"|"en"}]
-    Returns {id: {locale: {"title": str, "subtitle": str}}}.
-    """
+    """One Gemini call for a batch. items: [{"id", "fields": {field: source_text}}].
+    Returns {id: {field: {locale: value}}} with all 7 locales per provided field."""
     if not items:
         return {}
     langs = ", ".join(f'"{l}" ({LOCALE_NAMES[l]})' for l in LOCALES)
-    payload = [{"id": it["id"], "title": it["title"], "subtitle": it["subtitle"]} for it in items]
+    payload = [{"id": it["id"], "fields": it["fields"]} for it in items]
     prompt = (
-        "You translate short Egyptian school-textbook metadata. For EACH book below, translate "
-        f"its title and subtitle into ALL of these locales: {langs}. Keep proper nouns, grade/term "
-        "codes, numbers, and the brand '5sosy' unchanged. If a field is empty, return an empty string. "
-        'Reply with ONLY a JSON object mapping each book id to '
-        '{"<locale>": {"title": "...", "subtitle": "..."}, ...} for every locale, and nothing else.\n\n'
-        "BOOKS (JSON):\n" + json.dumps(payload, ensure_ascii=False)
+        "You translate short Egyptian school-textbook metadata labels (titles, book types, "
+        "grade levels, terms, education stages). For EACH book and EACH provided field, translate "
+        f"the value into ALL of these locales: {langs}. Keep proper nouns, numbers, model/week "
+        "numbers, and the brand '5sosy' intact. Reply with ONLY a JSON object mapping each book id "
+        'to {"<field>": {"<locale>": "<translation>", ...}, ...}, covering every locale for every '
+        "provided field, and nothing else.\n\nBOOKS (JSON):\n" + json.dumps(payload, ensure_ascii=False)
     )
     resp = client.models.generate_content(
         model=MODEL,
@@ -95,32 +100,23 @@ def translate_batch(client: genai.Client, items: list[dict]) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _seed_existing(doc: dict, title_i18n: dict, sub_i18n: dict) -> None:
-    """Carry the already-stored ar/en fields into the i18n maps untouched."""
-    if doc.get("arT") and not title_i18n.get("ar"):
-        title_i18n["ar"] = doc["arT"]
-    if doc.get("enT") and not title_i18n.get("en"):
-        title_i18n["en"] = doc["enT"]
-    if doc.get("arSub") and not sub_i18n.get("ar"):
-        sub_i18n["ar"] = doc["arSub"]
-    if doc.get("enSub") and not sub_i18n.get("en"):
-        sub_i18n["en"] = doc["enSub"]
-
-
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--limit", type=int, default=0, help="max books to process (0 = all)")
-    ap.add_argument("--batch-size", type=int, default=50, help="books per Gemini call")
-    ap.add_argument("--book", type=str, default=None, help="only this book _id")
-    ap.add_argument("--force", action="store_true", help="retranslate even if locale present")
-    ap.add_argument("--dry-run", action="store_true", help="don't write to MongoDB")
+    ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--batch-size", type=int, default=25)
+    ap.add_argument("--book", type=str, default=None)
+    ap.add_argument("--force", action="store_true")
+    ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
     _, db = get_mongodb_client()
     coll = db["books"]
     query = {"_id": args.book} if args.book else {}
-    proj = {"arT": 1, "enT": 1, "arTitle": 1, "enTitle": 1, "title": 1, "arSub": 1,
-            "enSub": 1, "language": 1, "titleI18n": 1, "subI18n": 1}
+    proj = {f: 1 for f in (
+        "arT", "enT", "arTitle", "enTitle", "title", "arType", "enType", "type",
+        "arGrade", "enGrade", "grade", "arTerm", "enTerm", "term", "arStage", "enStage", "stage",
+        "titleI18n", "typeI18n", "gradeI18n", "termI18n", "stageI18n",
+    )}
     cursor = coll.find(query, proj)
     if args.limit:
         cursor = cursor.limit(args.limit)
@@ -129,25 +125,36 @@ def main() -> int:
     client = genai.Client()
     processed = updated = skipped = errors = calls = 0
 
-    # Build the work list: only books with at least one missing locale (unless --force).
-    work: list[dict] = []
-    state: dict[str, dict] = {}  # id -> {title_i18n, sub_i18n, targets}
+    work: list[dict] = []   # [{id, fields:{field:source}}]
+    state: dict[str, dict] = {}   # id -> {map_field: {locale:val}} pre-seeded
+
     for doc in docs:
         processed += 1
         bid = str(doc.get("_id"))
-        title, subtitle, base_loc = _base(doc)
-        if not title:
+        maps: dict[str, dict] = {}
+        to_translate: dict[str, str] = {}
+        for fkey, mfield, ar_keys, en_keys, raw_key, en_real in FIELDS:
+            existing = dict(doc.get(mfield) or {})
+            ar_val = _first(doc, ar_keys) or _first(doc, [raw_key])
+            en_val = _first(doc, en_keys)
+            # Seed exact-language values we trust.
+            if ar_val and not existing.get("ar"):
+                existing["ar"] = ar_val
+            if en_real and en_val and not existing.get("en"):
+                existing["en"] = en_val
+            source = (en_val if en_real else "") or ar_val or _first(doc, [raw_key])
+            maps[mfield] = existing
+            missing = [l for l in LOCALES if args.force or l not in existing]
+            if source and missing:
+                to_translate[fkey] = source
+        if not to_translate:
             skipped += 1
             continue
-        title_i18n = dict(doc.get("titleI18n") or {})
-        sub_i18n = dict(doc.get("subI18n") or {})
-        _seed_existing(doc, title_i18n, sub_i18n)
-        targets = [l for l in LOCALES if args.force or l not in title_i18n or l not in sub_i18n]
-        if not targets:
-            skipped += 1
-            continue
-        state[bid] = {"title_i18n": title_i18n, "sub_i18n": sub_i18n, "targets": set(targets)}
-        work.append({"id": bid, "title": title, "subtitle": subtitle, "base": base_loc})
+        state[bid] = {"maps": maps}
+        work.append({"id": bid, "fields": to_translate})
+
+    # field key -> map field name
+    KEY2MAP = {fkey: mfield for fkey, mfield, *_ in FIELDS}
 
     bsize = max(1, args.batch_size)
     for i in range(0, len(work), bsize):
@@ -162,24 +169,23 @@ def main() -> int:
 
         for it in batch:
             bid = it["id"]
-            st = state[bid]
+            maps = state[bid]["maps"]
             per = out.get(bid) or {}
-            for loc in st["targets"]:
-                entry = per.get(loc) or {}
-                t = (entry.get("title") or "").strip()
-                s = (entry.get("subtitle") or "").strip()
-                if t:
-                    st["title_i18n"][loc] = _strip_surrogates(t)
-                if s:
-                    st["sub_i18n"][loc] = _strip_surrogates(s)
+            for fkey in it["fields"]:
+                mfield = KEY2MAP[fkey]
+                trans = per.get(fkey) or {}
+                for loc in LOCALES:
+                    if args.force or loc not in maps[mfield]:
+                        v = (trans.get(loc) or "").strip()
+                        if v:
+                            maps[mfield][loc] = _strip_surrogates(v)
             if args.dry_run:
-                print(f"  ~ {bid}: titleI18n={list(st['title_i18n'])}")
+                print(f"  ~ {bid}: " + " ".join(f"{m}={list(maps[m])}" for m in maps))
                 updated += 1
             else:
-                coll.update_one({"_id": bid},
-                                {"$set": {"titleI18n": st["title_i18n"], "subI18n": st["sub_i18n"]}})
+                coll.update_one({"_id": bid}, {"$set": {m: maps[m] for m in maps}})
                 updated += 1
-        print(f"  … call {calls}: {min(i + bsize, len(work))}/{len(work)} books")
+        print(f"  ... call {calls}: {min(i + bsize, len(work))}/{len(work)} books")
 
     print(f"done. processed={processed} updated={updated} skipped={skipped} errors={errors} "
           f"calls={calls}" + (" (dry-run)" if args.dry_run else ""))

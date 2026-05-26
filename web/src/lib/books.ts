@@ -86,6 +86,10 @@ export function bookFromFirestore(id: string, data: RawBookDoc): Book {
     enSubject: text(data.enSubject, rawSubject),
     titleI18n: localeMap(data.titleI18n),
     subI18n: localeMap(data.subI18n),
+    typeI18n: localeMap(data.typeI18n),
+    gradeI18n: localeMap(data.gradeI18n),
+    termI18n: localeMap(data.termI18n),
+    stageI18n: localeMap(data.stageI18n),
   };
 }
 
@@ -99,12 +103,38 @@ function localeMap(v: unknown): Record<string, string> | undefined {
 }
 
 // Locale-aware metadata accessors. Prefer the pre-translated field for the
-// active locale, then the ar/en pair, then anything non-empty.
-export function bookTitle(book: Book, locale: string): string {
-  return book.titleI18n?.[locale] || (locale === 'ar' ? book.arT : book.enT) || book.enT || book.arT || '';
+// active locale, then the ar/en pair, then anything non-empty. Note: for type/
+// grade/term/stage the stored en* fields are Arabic placeholders, so for a
+// non-Arabic locale we never fall back to en* — we use the i18n map or ar.
+function localized(map: Record<string, string> | undefined, locale: string, ar?: string, en?: string): string {
+  return map?.[locale] || (locale === 'ar' ? ar : en) || en || ar || '';
 }
 
+export function bookTitle(book: Book, locale: string): string {
+  return localized(book.titleI18n, locale, book.arT, book.enT) || book.arT || book.enT || '';
+}
+
+export function bookType(book: Book, locale: string): string {
+  return book.typeI18n?.[locale] || (locale === 'ar' ? book.arType : '') || book.arType || book.enType || '';
+}
+
+export function bookGrade(book: Book, locale: string): string {
+  return book.gradeI18n?.[locale] || (locale === 'ar' ? book.arGrade : '') || book.arGrade || book.enGrade || '';
+}
+
+export function bookTerm(book: Book, locale: string): string {
+  return book.termI18n?.[locale] || (locale === 'ar' ? book.arTerm : '') || book.arTerm || book.enTerm || '';
+}
+
+export function bookStage(book: Book, locale: string): string {
+  return book.stageI18n?.[locale] || (locale === 'ar' ? book.arStage : '') || book.arStage || book.enStage || '';
+}
+
+// Compose the subtitle from the localized stage / grade / term parts when any
+// are available; otherwise fall back to the stored ar/en subtitle.
 export function bookSubtitle(book: Book, locale: string): string {
+  const parts = [bookStage(book, locale), bookGrade(book, locale), bookTerm(book, locale)].filter(Boolean);
+  if (parts.length) return parts.join(' / ');
   return book.subI18n?.[locale] || (locale === 'ar' ? book.arSub : book.enSub) || book.enSub || book.arSub || '';
 }
 
