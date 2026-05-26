@@ -1,9 +1,21 @@
 export type Locale = 'ar' | 'en';
 
-export type SubjectId =
-  | 'physics' | 'chemistry' | 'biology' | 'arabic' | 'history'
-  | 'english' | 'math' | 'geology' | 'philosophy' | 'geography'
-  | 'science';
+export type SubjectId = string;
+
+export type Subject = {
+  slug: string;
+  name: string;
+  nameI18n: Record<string, string>;
+  descriptionI18n: Record<string, string>;
+  hue: string;
+  glyph: string;
+  tracks: string[];
+  bookCount?: number;
+  languages?: string[];
+  grades?: string[];
+  types?: string[];
+  books?: Array<{ id: string; title: string; titleI18n?: Record<string, string>; language?: string; grade?: string; type?: string }>;
+};
 
 export type Grade = 'g1' | 'g2' | 'g3';
 export type Track = 'sci_sci' | 'sci_math' | 'lit';

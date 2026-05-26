@@ -73,15 +73,23 @@ export function Ring({ value = 0.4, size = 44, stroke = 5, color }: { value?: nu
 }
 
 export function SubjectChip({ id, size = 'md' }: { id: SubjectId; size?: 'sm' | 'md' }) {
-  const { isAR } = useApp();
+  const { locale } = useApp();
   const m = SUBJECT_META[id];
-  if (!m) return null;
-  const h = HUE[m.hue];
+  if (!m) {
+    return (
+      <span className={`inline-flex items-center gap-1.5 rounded-md font-semibold bg-stone-50 text-stone-700 ${size === 'sm' ? 'text-[11px] px-2 py-0.5' : 'text-[12px] px-2.5 py-1'}`}>
+        <span>📚</span>
+        <span>{id.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</span>
+      </span>
+    );
+  }
+  const h = HUE[m.hue] || HUE.stone;
   const sz = size === 'sm' ? 'text-[11px] px-2 py-0.5' : 'text-[12px] px-2.5 py-1';
+  const name = m[locale] || m.en || m.ar || id;
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-md font-semibold ${h.bg} ${h.text} ${sz}`}>
       <span>{m.glyph}</span>
-      <span>{isAR ? m.ar : m.en}</span>
+      <span>{name}</span>
     </span>
   );
 }

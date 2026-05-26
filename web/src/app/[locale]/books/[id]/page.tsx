@@ -371,7 +371,9 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
     );
   }
 
-  const subjectMeta = SUBJECT_META[book.subject] || { glyph: '📚', hue: 'stone', ar: book.subject, en: book.subject };
+  const subjectMeta = SUBJECT_META[book.subject];
+  const subjectName = subjectMeta ? ((subjectMeta as any)[locale] || subjectMeta.en || subjectMeta.ar) : book.subject;
+  const glyph = subjectMeta ? subjectMeta.glyph : '📚';
 
   return (
     <ChromeLayout>
@@ -492,7 +494,7 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
           {/* Header */}
           <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center shrink-0">
             <div className="flex items-center gap-2">
-              <span className="text-xl">{subjectMeta.glyph}</span>
+              <span className="text-xl">{glyph}</span>
               <span className="font-extrabold text-[15px] text-slate-900">
                 {t.books.page} {currentPageNum} {t.books.pageOf} {pageCount}
               </span>
@@ -589,7 +591,12 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
             <div className="w-8 h-8 rounded-lg bg-sky-500/20 text-sky-400 grid place-items-center text-md">🦉</div>
             <div>
               <h3 className="font-extrabold text-[14px] text-white">
-                {isAR ? `معلم ${subjectMeta.ar} الذكي` : `AI ${subjectMeta.en} Tutor`}
+                {locale === 'ar' ? `معلم ${subjectName} الذكي` :
+                 locale === 'fr' ? `Tuteur IA en ${subjectName}` :
+                 locale === 'de' ? `KI-Tutor für ${subjectName}` :
+                 locale === 'es' ? `Tutor de IA de ${subjectName}` :
+                 locale === 'it' ? `Tutor IA di ${subjectName}` :
+                 locale === 'zh' ? `AI ${subjectName} 导师` : `AI ${subjectName} Tutor`}
               </h3>
               <p className="text-[11px] text-slate-400">{isAR ? 'اسألني أي شيء حول هذا الفصل' : 'Ask me anything about this page'}</p>
             </div>

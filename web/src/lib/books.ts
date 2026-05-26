@@ -183,15 +183,44 @@ export function bookMatchesQuery(book: Book, query: string): boolean {
 }
 
 export function normalizeSubject(raw: string): SubjectId {
-  const lowered = normalize(raw);
-  if ((Object.keys(SUBJECT_META) as SubjectId[]).includes(raw as SubjectId)) {
-    return raw as SubjectId;
+  const trimmed = raw.trim();
+  if (!trimmed) return 'geology';
+  
+  // 1. If it's already a valid slug in SUBJECT_META, return it
+  if (trimmed in SUBJECT_META) {
+    return trimmed as SubjectId;
   }
+  
+  // 2. Try to match by name (case-insensitive) in any of the localized fields in SUBJECT_META
+  const lowered = trimmed.toLowerCase();
+  for (const [slug, meta] of Object.entries(SUBJECT_META)) {
+    const locNames = [
+      meta.ar, meta.en, meta.fr, meta.de, meta.es, meta.it, meta.zh,
+      slug, slug.replace(/_/g, ' ')
+    ].filter(Boolean).map(n => n.toLowerCase());
+    
+    if (locNames.includes(lowered)) {
+      return slug as SubjectId;
+    }
+  }
+  
+  // 3. Fallback to substring matching on localized names
+  for (const [slug, meta] of Object.entries(SUBJECT_META)) {
+    const locNames = [
+      meta.ar, meta.en, meta.fr, meta.de, meta.es, meta.it, meta.zh
+    ].filter(Boolean).map(n => n.toLowerCase());
+    if (locNames.some(name => name && (lowered.includes(name) || name.includes(lowered)))) {
+      return slug as SubjectId;
+    }
+  }
+
+  // 4. Legacy aliases as last resort
   for (const [id, aliases] of SUBJECT_ALIASES) {
-    if (aliases.some((alias) => lowered.includes(normalize(alias)))) return id;
+    if (aliases.some((alias) => lowered.includes(normalize(alias)))) {
+      if (id in SUBJECT_META) return id as SubjectId;
+    }
   }
-  if (lowered.includes('science') || lowered.includes('علوم')) return 'science';
-  if (lowered.includes('ict') || lowered.includes('تكنولوجيا')) return 'math';
+  
   return 'geology';
 }
 

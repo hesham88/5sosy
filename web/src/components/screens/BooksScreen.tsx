@@ -1204,7 +1204,7 @@ export default function BooksScreen() {
                                   className="w-full text-[12px] border border-slate-200 rounded-lg p-2 focus:outline-none"
                                 >
                                   {Object.keys(SUBJECT_META).map(s => (
-                                    <option key={s} value={s}>{isAR ? SUBJECT_META[s as SubjectId].ar : SUBJECT_META[s as SubjectId].en}</option>
+                                    <option key={s} value={s}>{(SUBJECT_META[s] as any)[locale] || SUBJECT_META[s]?.en || SUBJECT_META[s]?.ar || s}</option>
                                   ))}
                                 </select>
                               </div>
@@ -1641,6 +1641,7 @@ function FilterContent({
   typeLabels: Map<string, string>;
   activeTab: string;
 }) {
+  const { locale } = useApp();
   return (
     <div className="space-y-6">
       {/* 1. Free-text search input */}
@@ -1808,7 +1809,7 @@ function FilterContent({
               >
                 <span className="flex items-center gap-2">
                   <span>{meta.glyph}</span>
-                  <span>{isAR ? meta.ar : meta.en}</span>
+                  <span>{(meta as any)[locale] || meta.en || meta.ar || s}</span>
                 </span>
               </button>
             );
