@@ -186,6 +186,31 @@ export default function SubjectsScreen() {
     [trackFilter, languageFilter, gradeFilter, typeFilter]
   );
 
+  // Layer 2 of the filter: which books WITHIN a subject match the active filters/
+  // query. Dropdowns (grade/type/language) always apply; the text query also
+  // narrows, but never blanks a card that surfaced via subject/semantic match.
+  const matchingBooks = useCallback(
+    (s: Subject) => {
+      let books = s.books || [];
+      if (gradeFilter !== 'all') books = books.filter((b) => b.grade === gradeFilter);
+      if (typeFilter !== 'all') books = books.filter((b) => b.type === typeFilter);
+      if (languageFilter !== 'all') books = books.filter((b) => b.language === languageFilter);
+      const query = q.trim().toLowerCase();
+      if (query) {
+        const qm = books.filter((b) => {
+          const parts: string[] = [b.title || '', b.grade || '', b.type || '', b.language || ''];
+          if (b.titleI18n) parts.push(...Object.values(b.titleI18n));
+          if (b.gradeI18n) parts.push(...Object.values(b.gradeI18n));
+          if (b.typeI18n) parts.push(...Object.values(b.typeI18n));
+          return parts.join(' ').toLowerCase().includes(query);
+        });
+        return qm.length ? qm : books;
+      }
+      return books;
+    },
+    [gradeFilter, typeFilter, languageFilter, q]
+  );
+
   // Merge instant client matches with content matches from the backend. Subjects
   // matched semantically (but missed by the metadata substring pass) are added if
   // they pass the dropdown filters; the list is ordered by semantic score first.
@@ -274,13 +299,17 @@ export default function SubjectsScreen() {
                 ? s.tracks.map((tr) => TRACK_LABELS[tr]?.[isAR ? 'ar' : 'en'] || tr).join(' · ')
                 : (isAR ? 'عام / مشترك' : 'General / Core');
 
-              // Localize grades and book types based on the books inside the subject
+              // Layer-2 filtered books for this subject; chips/count/list all derive
+              // from this so the filter cascades into the card, not just the grid.
+              const books = matchingBooks(s);
+
+              // Localize grades and book types based on the (filtered) books inside the subject
               const localizedGrades = Array.from(new Set(
-                (s.books || []).map(b => b.gradeI18n?.[locale] || b.gradeI18n?.en || b.grade || '')
+                books.map(b => b.gradeI18n?.[locale] || b.gradeI18n?.en || b.grade || '')
               )).filter(Boolean);
 
               const localizedTypes = Array.from(new Set(
-                (s.books || []).map(b => b.typeI18n?.[locale] || b.typeI18n?.en || b.type || '')
+                books.map(b => b.typeI18n?.[locale] || b.typeI18n?.en || b.type || '')
               )).filter(Boolean);
 
               return (
@@ -358,8 +387,8 @@ export default function SubjectsScreen() {
                       )}
                     </div>
 
-                    {/* Expandable Books List */}
-                    {s.books && s.books.length > 0 && (
+                    {/* Expandable Books List (filtered — layer 2) */}
+                    {books.length > 0 && (
                       <div className="border-b border-slate-100">
                         <button
                           onClick={() => setExpandedSlug(expandedSlug === s.slug ? null : s.slug)}
@@ -369,17 +398,17 @@ export default function SubjectsScreen() {
                             <span>📚</span>
                             <span>{isAR ? 'عرض المراجع والكتب' : 'View Textbooks'}</span>
                             <span className="px-1.5 py-0.5 rounded-full bg-slate-100 text-[10.5px] text-slate-500 font-bold">
-                              {s.bookCount}
+                              {hasActiveFilters && books.length !== s.bookCount ? `${books.length}/${s.bookCount}` : s.bookCount}
                             </span>
                           </span>
                           <span className="text-slate-400 text-[10px] transition-transform duration-200" style={{ transform: expandedSlug === s.slug ? 'rotate(180deg)' : 'rotate(0deg)' }}>
                             ▼
                           </span>
                         </button>
-                        
+
                         {expandedSlug === s.slug && (
                           <div className="px-4 py-3 bg-slate-50/50 max-h-[220px] overflow-y-auto space-y-2 border-t border-slate-100 slim">
-                            {s.books.map((b) => {
+                            {books.map((b) => {
                               const bookTitleStr = b.titleI18n?.[locale] || b.title;
                               return (
                                 <div
