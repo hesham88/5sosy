@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-type JobKind = 'harvester' | 'analyzer' | 'migration';
+type JobKind = 'harvester' | 'analyzer' | 'migration' | 'reconcile' | 'mindmap';
 
 /**
  * Proxy a job-command POST to the khsosybot service.

@@ -33,6 +33,37 @@ SIM_THRESHOLD = float(os.getenv("MINDMAP_SIM_THRESHOLD", "0.82"))
 MIN_CONCEPT_SIZE = int(os.getenv("MINDMAP_MIN_CONCEPT_SIZE", "2"))
 
 
+def _log(status_ref, text: str, level: str = "info") -> None:
+    """Echo to stdout (Cloud Logging) + append to the Firestore status doc the
+    PipelineConsole reads."""
+    print(f"[mindmap] {text}", flush=True)
+    if status_ref is None:
+        return
+    try:
+        from datetime import datetime, timezone
+        from google.cloud import firestore
+        doc = status_ref.get().to_dict() or {}
+        logs = doc.get("logs", [])
+        logs.append({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "text": text, "status": level, "agent": "MindMap",
+        })
+        status_ref.update({"logs": logs[-50:], "lastHeartbeatAt": firestore.SERVER_TIMESTAMP})
+    except Exception as e:  # noqa: BLE001
+        print(f"[mindmap] log update failed ({e})", flush=True)
+
+
+def _progress(status_ref, fields: dict) -> None:
+    if status_ref is None:
+        return
+    try:
+        from google.cloud import firestore
+        fields["lastHeartbeatAt"] = firestore.SERVER_TIMESTAMP
+        status_ref.update(fields)
+    except Exception as e:  # noqa: BLE001
+        print(f"[mindmap] progress update failed ({e})", flush=True)
+
+
 def _normalize(vectors):
     import numpy as np
     arr = np.asarray(vectors, dtype="float32")
@@ -89,8 +120,12 @@ def run_mindmap_pipeline(status_ref=None, subjects: list[str] | None = None) -> 
     started = time.time()
     total_concepts = 0
     total_occurrences = 0
+    total_subjects = len(subjects)
+    _log(status_ref, f"Concept clustering starting over {total_subjects} subjects.")
+    _progress(status_ref, {"totalBooks": total_subjects, "indexedBooks": 0, "percentage": 0.0,
+                           "progressMessage": "Clustering concepts…"})
 
-    for subject in subjects:
+    for idx, subject in enumerate(subjects, start=1):
         proj = {"embedding": 1, "bookId": 1, "pageNumber": 1, "language": 1,
                 "grade": 1, "bookType": 1, "type": 1, "keywords": 1}
         docs = [d for d in pages.find({"subject": subject, "embedding": {"$exists": True, "$ne": []}}, proj)]
@@ -159,6 +194,13 @@ def run_mindmap_pipeline(status_ref=None, subjects: list[str] | None = None) -> 
                 occ.insert_many(occ_ops)
                 total_occurrences += len(occ_ops)
 
+        pct = round(100.0 * idx / total_subjects, 1) if total_subjects else 0.0
+        _progress(status_ref, {"indexedBooks": idx, "percentage": pct,
+                               "progressMessage": f"{subject}: {total_concepts} concepts so far"})
+        _log(status_ref, f"[{idx}/{total_subjects}] {subject}: {total_concepts} concepts, {total_occurrences} occurrences")
+
+    _log(status_ref, f"Clustering done: {total_concepts} concepts, {total_occurrences} occurrences "
+                     f"across {total_subjects} subjects.", "ok")
     return {
         "ok": True,
         "subjects": len(subjects),

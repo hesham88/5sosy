@@ -8,7 +8,7 @@ import { useAuth } from '@/lib/firebase/auth-context';
 /* ───────────────────────── types ───────────────────────── */
 /* ... existing types omitted for brevity ... */
 
-type JobKind = 'harvester' | 'analyzer' | 'migration';
+type JobKind = 'harvester' | 'analyzer' | 'migration' | 'reconcile' | 'mindmap';
 type JobCommand = 'start' | 'pause' | 'resume' | 'stop' | 'reset';
 type JobStatus = 'idle' | 'running' | 'paused' | 'completed' | 'error';
 
@@ -79,6 +79,24 @@ const CARDS: JobCardConfig[] = [
     titleEN: 'Data Migration',
     subAR: 'ترحيل البيانات بالكامل من قاعدة Firestore الحالية إلى MongoDB',
     subEN: 'Migrate all data from Firestore to the new MongoDB cluster',
+    primaryMetric: 'indexed',
+  },
+  {
+    kind: 'reconcile',
+    icon: '🧩',
+    titleAR: 'مهمة مطابقة بيانات الصفحات',
+    titleEN: 'Page Reconciliation',
+    subAR: 'نسخ المادة والصف والنوع واللغة والكلمات المفتاحية إلى صفحات الكتب لتحسين البحث',
+    subEN: 'Backfill subject/grade/type/language + keywords onto book pages for better search',
+    primaryMetric: 'indexed',
+  },
+  {
+    kind: 'mindmap',
+    icon: '🗺️',
+    titleAR: 'مهمة الخريطة المفاهيمية',
+    titleEN: 'Mind-Map Builder',
+    subAR: 'تجميع تضمينات الصفحات في مفاهيم وربطها عبر الصفوف الدراسية',
+    subEN: 'Cluster page embeddings into concepts + cross-grade lineage',
     primaryMetric: 'indexed',
   },
 ];
@@ -170,7 +188,9 @@ export default function PipelineConsole({ isAR }: Props) {
   const [harvester, setHarvester] = useState<PipelineJobStatus | null>(null);
   const [analyzer, setAnalyzer] = useState<PipelineJobStatus | null>(null);
   const [migration, setMigration] = useState<PipelineJobStatus | null>(null);
-  const [busy, setBusy] = useState<Record<JobKind, JobCommand | null>>({ harvester: null, analyzer: null, migration: null });
+  const [reconcile, setReconcile] = useState<PipelineJobStatus | null>(null);
+  const [mindmap, setMindmap] = useState<PipelineJobStatus | null>(null);
+  const [busy, setBusy] = useState<Record<JobKind, JobCommand | null>>({ harvester: null, analyzer: null, migration: null, reconcile: null, mindmap: null });
   const [nowTick, setNowTick] = useState(Date.now());
 
   // Firestore real-time listeners on the three status docs
@@ -192,10 +212,22 @@ export default function PipelineConsole({ isAR }: Props) {
         (snap) => setMigration(snap.exists() ? (snap.data() as PipelineJobStatus) : null),
         (err) => console.error('[pipeline] migration listener failed:', err),
       );
+      const unsubR = onSnapshot(
+        doc(db, 'ingestion', 'reconcile_status'),
+        (snap) => setReconcile(snap.exists() ? (snap.data() as PipelineJobStatus) : null),
+        (err) => console.error('[pipeline] reconcile listener failed:', err),
+      );
+      const unsubMm = onSnapshot(
+        doc(db, 'ingestion', 'mindmap_status'),
+        (snap) => setMindmap(snap.exists() ? (snap.data() as PipelineJobStatus) : null),
+        (err) => console.error('[pipeline] mindmap listener failed:', err),
+      );
       return () => {
         unsubH();
         unsubA();
         unsubM();
+        unsubR();
+        unsubMm();
       };
     } catch (e) {
       console.error('[pipeline] init failed:', e);
@@ -231,6 +263,8 @@ export default function PipelineConsole({ isAR }: Props) {
     harvester,
     analyzer,
     migration,
+    reconcile,
+    mindmap,
   };
 
   return (

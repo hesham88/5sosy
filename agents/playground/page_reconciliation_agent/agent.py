@@ -58,8 +58,10 @@ def _extract_keywords(text: str, k: int = KEYWORDS_PER_PAGE) -> list[str]:
 
 
 def _log(status_ref, text: str, level: str = "info") -> None:
+    # Always echo to stdout so Cloud Logging captures progress (not only the
+    # Firestore status doc the console reads).
+    print(f"[reconcile] {text}", flush=True)
     if status_ref is None:
-        print(f"[reconcile] {text}")
         return
     try:
         from google.cloud import firestore
@@ -74,7 +76,20 @@ def _log(status_ref, text: str, level: str = "info") -> None:
             "lastHeartbeatAt": firestore.SERVER_TIMESTAMP,
         })
     except Exception as e:  # noqa: BLE001
-        print(f"[reconcile] log failed ({e}): {text}")
+        print(f"[reconcile] log update failed ({e})", flush=True)
+
+
+def _progress(status_ref, fields: dict) -> None:
+    """Update structured progress fields the PipelineConsole renders (totalBooks,
+    indexedBooks=processed, percentage, progressMessage, activeBookTitle) + heartbeat."""
+    if status_ref is None:
+        return
+    try:
+        from google.cloud import firestore
+        fields["lastHeartbeatAt"] = firestore.SERVER_TIMESTAMP
+        status_ref.update(fields)
+    except Exception as e:  # noqa: BLE001
+        print(f"[reconcile] progress update failed ({e})", flush=True)
 
 
 def run_reconciliation_pipeline(status_ref=None) -> dict:
@@ -90,8 +105,10 @@ def run_reconciliation_pipeline(status_ref=None) -> dict:
     books = mdb["books"]
     pages = mdb["book_pages"]
 
-    total_books = books.count_documents({})
+    total_books = RECONCILE_LIMIT if RECONCILE_LIMIT > 0 else books.count_documents({})
     _log(status_ref, f"Reconciliation starting over {total_books} books.")
+    _progress(status_ref, {"totalBooks": total_books, "indexedBooks": 0, "totalPagesProcessed": 0,
+                           "percentage": 0.0, "progressMessage": "Starting reconciliation…"})
 
     processed_books = 0
     updated_pages = 0
@@ -137,7 +154,14 @@ def run_reconciliation_pipeline(status_ref=None) -> dict:
 
         processed_books += 1
         if processed_books % BOOK_BATCH == 0:
+            pct = round(100.0 * processed_books / total_books, 1) if total_books else 0.0
             _log(status_ref, f"…{processed_books}/{total_books} books, {updated_pages} pages updated.")
+            _progress(status_ref, {
+                "indexedBooks": processed_books,
+                "totalPagesProcessed": updated_pages,
+                "percentage": pct,
+                "progressMessage": f"Reconciled {processed_books}/{total_books} books",
+            })
 
     summary = {
         "ok": True,
@@ -147,6 +171,12 @@ def run_reconciliation_pipeline(status_ref=None) -> dict:
         "booksSkippedNoSubject": skipped_no_subject,
         "elapsedSec": round(time.time() - started, 1),
     }
+    _progress(status_ref, {
+        "indexedBooks": processed_books,
+        "totalPagesProcessed": updated_pages,
+        "percentage": 100.0,
+        "progressMessage": f"Done: {updated_pages} pages updated, {empty_text_pages} empty-text flagged",
+    })
     _log(
         status_ref,
         f"Reconciliation done: {processed_books} books, {updated_pages} pages updated, "

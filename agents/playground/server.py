@@ -987,6 +987,8 @@ async def ingestion_sync(
 HARVESTER_JOB_NAME = os.getenv("HARVESTER_JOB_NAME", "khsosybot-get-books")
 ANALYZER_JOB_NAME = os.getenv("ANALYZER_JOB_NAME", "khsosybot-analyze-books")
 MIGRATION_JOB_NAME = os.getenv("MIGRATION_JOB_NAME", "khsosybot-migration")
+RECONCILE_JOB_NAME = os.getenv("RECONCILE_JOB_NAME", "khsosybot-reconcile")
+MINDMAP_JOB_NAME = os.getenv("MINDMAP_JOB_NAME", "khsosybot-mindmap")
 
 
 def _job_config(kind: str) -> tuple[str, str]:
@@ -997,6 +999,10 @@ def _job_config(kind: str) -> tuple[str, str]:
         return ANALYZER_JOB_NAME, "analyzer_status"
     if kind == "migration":
         return MIGRATION_JOB_NAME, "migration_status"
+    if kind == "reconcile":
+        return RECONCILE_JOB_NAME, "reconcile_status"
+    if kind == "mindmap":
+        return MINDMAP_JOB_NAME, "mindmap_status"
     raise HTTPException(status_code=400, detail=f"Unknown job kind: {kind}")
 
 
@@ -1296,6 +1302,27 @@ async def _handle_job_command(kind: str, command: str) -> dict:
                 "executionName": execution_name,
                 "message": "Migration job execution launched with DB reset.",
             }
+        elif kind == "reconcile":
+            # Reconcile only writes metadata onto pages; nothing to wipe. Status cleared above.
+            return {
+                "ok": True, "status": "idle", "kind": "reconcile",
+                "message": "Reconcile status reset.",
+            }
+        elif kind == "mindmap":
+            # Drop the concept graph so a fresh run rebuilds it from scratch.
+            from shared.mongodb_client import get_mongodb_client
+            _, mdb = get_mongodb_client()
+            def _wipe_concepts() -> int:
+                n = mdb["concept_nodes"].count_documents({})
+                mdb["concept_nodes"].delete_many({})
+                mdb["concept_occurrences"].delete_many({})
+                mdb["concept_edges"].delete_many({})
+                return n
+            dropped = await loop.run_in_executor(None, _wipe_concepts)
+            return {
+                "ok": True, "status": "idle", "kind": "mindmap",
+                "message": f"Mind-map reset. Dropped {dropped} concept nodes + occurrences + edges.",
+            }
 
     raise HTTPException(status_code=400, detail=f"Unknown {kind} command: {command}")
 
@@ -1330,6 +1357,24 @@ async def ingestion_migration(
 ) -> dict:
     _require_api_key(x_api_key)
     return await _handle_job_command("migration", req.command)
+
+
+@app.post("/v1/ingestion/reconcile")
+async def ingestion_reconcile(
+    req: JobCommandRequest,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> dict:
+    _require_api_key(x_api_key)
+    return await _handle_job_command("reconcile", req.command)
+
+
+@app.post("/v1/ingestion/mindmap")
+async def ingestion_mindmap(
+    req: JobCommandRequest,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> dict:
+    _require_api_key(x_api_key)
+    return await _handle_job_command("mindmap", req.command)
 
 
 class CrawlPlaylistsRequest(BaseModel):
