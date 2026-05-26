@@ -308,8 +308,16 @@ def _infer_intent(trace: list[dict]) -> str:
             if tool == "get_weather_celsius":
                 return "ask_weather"
     for step in trace:
-        if step.get("step_type") == "transfer" and step.get("to") == "executor":
-            return "ask_time_or_weather"
+        if step.get("step_type") == "transfer":
+            to = step.get("to")
+            if to == "executor":
+                return "ask_time_or_weather"
+            if to == "feedback":
+                return "report_feedback"
+            if to == "translator":
+                return "request_translation"
+            if to == "ask_me":
+                return "ask_library"
     return "chit_chat"
 
 

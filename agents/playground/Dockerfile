@@ -19,7 +19,9 @@ COPY migration_agent ./migration_agent
 COPY language_detection_agent ./language_detection_agent
 COPY translation_agent ./translation_agent
 COPY ask_me_agent ./ask_me_agent
+COPY feedback_agent ./feedback_agent
 COPY shared ./shared
+COPY scripts ./scripts
 COPY server.py ./
 COPY playlist_crawler.py ./
 COPY sync_job_main.py ./
