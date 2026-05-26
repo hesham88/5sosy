@@ -6,6 +6,7 @@ import { getDictionary } from '@/i18n/get-dictionary';
 import { Providers } from '@/components/shared/Providers';
 import { AuthGate } from '@/components/shared/AuthGate';
 import { FiveSosyBot } from '@/components/fivesosybot/FiveSosyBot';
+import { SITE_URL, ogLocale, languageAlternates } from '@/lib/seo';
 
 const cairo = Cairo({ subsets: ['arabic', 'latin'], variable: '--font-cairo', weight: ['400','500','600','700','800'] });
 const inter = Inter({ subsets: ['latin', 'latin-ext'], variable: '--font-inter' });
@@ -15,9 +16,34 @@ const jetbrains = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono', 
 // behind a CSS variable either way, but the class is conditional.
 const notoSC = Noto_Sans_SC({ subsets: ['latin'], variable: '--font-zh', weight: ['400','500','700'] });
 
-export const metadata: Metadata = {
-  title: '5sosy — خصوصي الذكي'
-};
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale } = await params;
+  if (!isLocale(locale)) return {};
+  const dict = await getDictionary(locale as Locale);
+  const title = `${dict.appName} — ${dict.appSub}`;
+  const description = dict.landing.heroSubtitle;
+  return {
+    title,
+    description,
+    alternates: {
+      canonical: `${SITE_URL}/${locale}`,
+      languages: languageAlternates(''),
+    },
+    openGraph: {
+      type: 'website',
+      siteName: dict.appName,
+      locale: ogLocale(locale as Locale),
+      url: `${SITE_URL}/${locale}`,
+      title,
+      description,
+    },
+    twitter: { card: 'summary_large_image', title, description },
+  };
+}
 
 export async function generateStaticParams() {
   return LOCALES.map((locale) => ({ locale }));
@@ -35,6 +61,36 @@ export default async function LocaleLayout({
   const dict = await getDictionary(locale as Locale);
   const dir = dirFor(locale as Locale);
 
+  const jsonLd = {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'Organization',
+        '@id': `${SITE_URL}#org`,
+        name: '5sosy',
+        url: SITE_URL,
+      },
+      {
+        '@type': 'WebSite',
+        '@id': `${SITE_URL}#website`,
+        url: SITE_URL,
+        name: '5sosy',
+        inLanguage: locale,
+        publisher: { '@id': `${SITE_URL}#org` },
+      },
+      {
+        '@type': 'WebApplication',
+        name: dict.appName,
+        url: `${SITE_URL}/${locale}`,
+        applicationCategory: 'EducationalApplication',
+        operatingSystem: 'Web',
+        inLanguage: locale,
+        description: dict.landing.heroSubtitle,
+        offers: { '@type': 'Offer', price: '0', priceCurrency: 'EGP' },
+      },
+    ],
+  };
+
   return (
     <html
       lang={locale}
@@ -43,6 +99,10 @@ export default async function LocaleLayout({
       data-locale={locale}
     >
       <body>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        />
         <Providers locale={locale as Locale} dict={dict}>
           <AuthGate>
             {children}

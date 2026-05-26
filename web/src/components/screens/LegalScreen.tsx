@@ -59,6 +59,17 @@ export default function LegalScreen({ kind }: { kind: 'terms' | 'privacy' }) {
       <main className="max-w-3xl mx-auto px-5 py-12">
         <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-950">{title}</h1>
         <p className="mt-4 text-[15.5px] leading-relaxed text-slate-600">{intro}</p>
+
+        {kind === 'terms' && (
+          <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
+            <h2 className="flex items-center gap-2 font-extrabold text-[15.5px] text-amber-900">
+              <span aria-hidden>⚠️</span> {t.legal.disclaimerTitle}
+            </h2>
+            <p className="mt-2 text-[14px] leading-relaxed text-amber-900/90">{t.legal.disclaimerBody}</p>
+            <p className="mt-2 text-[14px] leading-relaxed text-amber-900/90">{t.legal.disclaimerReport}</p>
+          </div>
+        )}
+
         <div className="mt-8 space-y-6">
           {sections.map(([h, body], i) => (
             <section key={i} className="rounded-2xl bg-white/80 backdrop-blur border border-white/70 shadow-sm p-6">

@@ -392,6 +392,11 @@ const dict = {
     footerPrivacy: 'Datenschutz',
     footerRights: 'Alle Rechte vorbehalten.',
     footerDevelopedBy: 'Entwickelt von Asdaa.co',
+  },
+  legal: {
+    disclaimerTitle: 'Wichtig: KI kann Fehler machen',
+    disclaimerBody: 'Die Antworten von 5sosy werden von einer KI erzeugt und können unvollständig oder falsch sein. Überprüfe sie immer selbst und kläre sie mit deiner Lehrkraft oder einem Elternteil, bevor du dich darauf verlässt – besonders vor einer Prüfung.',
+    disclaimerReport: 'Einen Fehler oder ein Problem entdeckt? Bitte melde es über den 5sosy-Assistenten in der unteren Ecke, damit wir es beheben können.',
   }
 } satisfies Dictionary;
 

@@ -392,6 +392,11 @@ const dict = {
     footerPrivacy: 'Política de privacidad',
     footerRights: 'Todos los derechos reservados.',
     footerDevelopedBy: 'Desarrollado por Asdaa.co',
+  },
+  legal: {
+    disclaimerTitle: 'Importante: la IA puede equivocarse',
+    disclaimerBody: 'Las respuestas de 5sosy las genera una IA y pueden estar incompletas o ser incorrectas. Revísalas siempre por tu cuenta y confírmalas con tu profesor o un familiar antes de confiar en ellas, sobre todo antes de un examen.',
+    disclaimerReport: '¿Encontraste un error o un problema? Repórtalo a través del asistente 5sosy en la esquina inferior para que podamos corregirlo.',
   }
 } satisfies Dictionary;
 

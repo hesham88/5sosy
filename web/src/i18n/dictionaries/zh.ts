@@ -392,6 +392,11 @@ const dict = {
     footerPrivacy: '隐私政策',
     footerRights: '保留所有权利。',
     footerDevelopedBy: '由 Asdaa.co 开发',
+  },
+  legal: {
+    disclaimerTitle: '重要提示：AI 可能会出错',
+    disclaimerBody: '5sosy 的回答由 AI 生成，可能不完整或不准确。请务必自行复核，并在依赖这些内容之前与老师或家长确认，尤其是在考试之前。',
+    disclaimerReport: '发现错误或问题？请通过右下角的 5sosy 助手报告，以便我们及时修复。',
   }
 } satisfies Dictionary;
 
