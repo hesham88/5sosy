@@ -62,7 +62,20 @@ const dict = {
     takeQuiz: 'اختبر نفسك',
     allSubjects: 'كل المواد',
     onlyTrack: 'مسار الدراسة بس',
-    none: 'مفيش مواد بعد. ابدأ من الإعداد.'
+    none: 'مفيش مواد بعد. ابدأ من الإعداد.',
+    searchPlaceholder: 'ابحث في المواد والكتب والصفوف والأنواع…',
+    searchBtn: 'بحث',
+    filtersTitle: 'تصفية',
+    gradeLabel: 'الصف',
+    typeLabel: 'النوع',
+    languageLabel: 'اللغة',
+    trackLabel: 'الشعبة',
+    allGrades: 'كل الصفوف',
+    allTypes: 'كل الأنواع',
+    allLanguages: 'كل اللغات',
+    allTracks: 'كل الشعب',
+    resetFilters: 'إعادة ضبط',
+    noMatch: 'لا توجد مواد مطابقة لبحثك.'
   },
   plan: {
     title: 'خطتك الأسبوعية',

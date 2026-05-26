@@ -64,7 +64,20 @@ const dict = {
     takeQuiz: 'Hacer el quiz',
     allSubjects: 'Todas las materias',
     onlyTrack: 'Solo mi itinerario',
-    none: 'Aún no hay materias — completa primero la configuración inicial.'
+    none: 'Aún no hay materias — completa primero la configuración inicial.',
+    searchPlaceholder: 'Buscar materias, libros, grados, tipos…',
+    searchBtn: 'Buscar',
+    filtersTitle: 'Filtros',
+    gradeLabel: 'Grado',
+    typeLabel: 'Tipo',
+    languageLabel: 'Idioma',
+    trackLabel: 'Itinerario',
+    allGrades: 'Todos los grados',
+    allTypes: 'Todos los tipos',
+    allLanguages: 'Todos los idiomas',
+    allTracks: 'Todos los itinerarios',
+    resetFilters: 'Restablecer',
+    noMatch: 'Ninguna materia coincide con tu búsqueda.'
   },
   plan: {
     title: 'Tu plan semanal',

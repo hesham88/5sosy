@@ -1,13 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChromeLayout } from '../shared/Chrome';
 import { useApp } from '../shared/Providers';
 import { useProfile } from '@/lib/firebase/use-profile';
 import { Btn, Card } from '../shared/atoms';
-import { SUBJECT_META, HUE, type HueId } from '@/constants/subjects';
+import { SUBJECT_META, HUE, TRACK_LABELS, type HueId } from '@/constants/subjects';
 import type { Subject } from '@/lib/types';
+import SubjectFilters from './subjects/SubjectFilters';
 
 export default function SubjectsScreen() {
   const { isAR, t, locale } = useApp();
@@ -17,6 +18,13 @@ export default function SubjectsScreen() {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedSlug, setExpandedSlug] = useState<string | null>(null);
+
+  // Search + multi-attribute filter state (Batch 2 — Subjects search engine, frontend tier)
+  const [q, setQ] = useState('');
+  const [gradeFilter, setGradeFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [languageFilter, setLanguageFilter] = useState('all');
+  const [trackFilter, setTrackFilter] = useState('all');
 
   const activeTrack = profile?.track || 'sci_sci';
 
@@ -37,9 +45,88 @@ export default function SubjectsScreen() {
     loadSubjects();
   }, []);
 
-  const visible = filter === 'track'
-    ? subjects.filter((s) => s.tracks.length === 0 || s.tracks.includes(activeTrack))
-    : subjects;
+  const visible = useMemo(
+    () =>
+      filter === 'track'
+        ? subjects.filter((s) => s.tracks.length === 0 || s.tracks.includes(activeTrack))
+        : subjects,
+    [filter, subjects, activeTrack]
+  );
+
+  // Filter dropdown options, derived from the loaded data with localized labels.
+  const gradeOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    subjects.forEach((s) =>
+      (s.books || []).forEach((b) => {
+        if (b.grade && !m.has(b.grade)) m.set(b.grade, b.gradeI18n?.[locale] || b.gradeI18n?.en || b.grade);
+      })
+    );
+    return Array.from(m, ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [subjects, locale]);
+
+  const typeOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    subjects.forEach((s) =>
+      (s.books || []).forEach((b) => {
+        if (b.type && !m.has(b.type)) m.set(b.type, b.typeI18n?.[locale] || b.typeI18n?.en || b.type);
+      })
+    );
+    return Array.from(m, ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [subjects, locale]);
+
+  const languageOptions = useMemo(() => {
+    const set = new Set<string>();
+    subjects.forEach((s) => (s.languages || []).forEach((l) => l && set.add(l)));
+    return Array.from(set)
+      .sort()
+      .map((l) => ({
+        value: l,
+        label: l === 'ar' ? (isAR ? 'عربي' : 'Arabic') : l === 'en' ? (isAR ? 'إنجليزي' : 'English') : l.toUpperCase(),
+      }));
+  }, [subjects, isAR]);
+
+  const trackOptions = useMemo(() => {
+    const set = new Set<string>();
+    subjects.forEach((s) => s.tracks.forEach((tr) => set.add(tr)));
+    return Array.from(set).map((tr) => ({ value: tr, label: TRACK_LABELS[tr]?.[isAR ? 'ar' : 'en'] || tr }));
+  }, [subjects, isAR]);
+
+  const hasActiveFilters =
+    q.trim() !== '' || gradeFilter !== 'all' || typeFilter !== 'all' || languageFilter !== 'all' || trackFilter !== 'all';
+
+  const resetFilters = () => {
+    setQ('');
+    setGradeFilter('all');
+    setTypeFilter('all');
+    setLanguageFilter('all');
+    setTrackFilter('all');
+  };
+
+  // A search/filter spans ALL subjects (so matches outside the active track surface);
+  // with no active query/filter we respect the track toggle for the default browse view.
+  const displayed = useMemo(() => {
+    const base = hasActiveFilters ? subjects : visible;
+    const query = q.trim().toLowerCase();
+    return base.filter((s) => {
+      if (trackFilter !== 'all' && !s.tracks.includes(trackFilter)) return false;
+      if (languageFilter !== 'all' && !(s.languages || []).includes(languageFilter)) return false;
+      if (gradeFilter !== 'all' && !(s.books || []).some((b) => b.grade === gradeFilter)) return false;
+      if (typeFilter !== 'all' && !(s.books || []).some((b) => b.type === typeFilter)) return false;
+      if (!query) return true;
+      // Cross-locale, cross-field haystack: subject names (all locales) + every book's
+      // title/grade/type/language and their i18n variants.
+      const parts: string[] = [s.name, ...Object.values(s.nameI18n || {})];
+      const meta = SUBJECT_META[s.slug];
+      if (meta) parts.push(meta.ar, meta.en, meta.fr, meta.de, meta.es, meta.it, meta.zh);
+      (s.books || []).forEach((b) => {
+        parts.push(b.title || '', b.grade || '', b.type || '', b.language || '');
+        if (b.titleI18n) parts.push(...Object.values(b.titleI18n));
+        if (b.gradeI18n) parts.push(...Object.values(b.gradeI18n));
+        if (b.typeI18n) parts.push(...Object.values(b.typeI18n));
+      });
+      return parts.join(' ').toLowerCase().includes(query);
+    });
+  }, [subjects, visible, hasActiveFilters, q, gradeFilter, typeFilter, languageFilter, trackFilter]);
 
   return (
     <ChromeLayout>
@@ -65,6 +152,29 @@ export default function SubjectsScreen() {
           </div>
         </div>
 
+        {!loading && subjects.length > 0 && (
+          <SubjectFilters
+            t={t.subjects}
+            isAR={isAR}
+            q={q}
+            setQ={setQ}
+            gradeFilter={gradeFilter}
+            setGradeFilter={setGradeFilter}
+            typeFilter={typeFilter}
+            setTypeFilter={setTypeFilter}
+            languageFilter={languageFilter}
+            setLanguageFilter={setLanguageFilter}
+            trackFilter={trackFilter}
+            setTrackFilter={setTrackFilter}
+            gradeOptions={gradeOptions}
+            typeOptions={typeOptions}
+            languageOptions={languageOptions}
+            trackOptions={trackOptions}
+            hasActiveFilters={hasActiveFilters}
+            onReset={resetFilters}
+          />
+        )}
+
         {loading ? (
           <div className="flex flex-col items-center justify-center p-12 space-y-4">
             <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
@@ -72,15 +182,32 @@ export default function SubjectsScreen() {
               {isAR ? 'جاري تحميل المواد الدراسية...' : 'Loading subjects...'}
             </p>
           </div>
-        ) : visible.length === 0 ? (
-          <Card className="p-8 text-center text-slate-500">{t.subjects.none}</Card>
+        ) : displayed.length === 0 ? (
+          <Card className="p-8 text-center text-slate-500">{hasActiveFilters ? t.subjects.noMatch : t.subjects.none}</Card>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-5 animate-fade-in">
-            {visible.map((s) => {
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-5">
+            {displayed.map((s) => {
               const meta = SUBJECT_META[s.slug] || { hue: 'stone', glyph: '📚' };
               const h = HUE[meta.hue as HueId] || HUE.stone;
-              const name = s.nameI18n[locale] || s.nameI18n.en || s.name;
-              const desc = s.descriptionI18n[locale] || s.descriptionI18n.en || '';
+              // SUBJECT_META carries all 7 locales and is the authoritative source for
+              // name/description; the per-subject i18n maps from the API are secondary.
+              // Never bottom out at the raw Arabic `s.name` when a localized value exists.
+              const fullMeta = SUBJECT_META[s.slug];
+              const name = fullMeta?.[locale] || s.nameI18n[locale] || fullMeta?.en || s.nameI18n.en || s.name;
+              const desc = fullMeta?.description?.[locale] || s.descriptionI18n[locale] || fullMeta?.description?.en || s.descriptionI18n.en || '';
+              const trackLabel = s.tracks.length > 0
+                ? s.tracks.map((tr) => TRACK_LABELS[tr]?.[isAR ? 'ar' : 'en'] || tr).join(' · ')
+                : (isAR ? 'عام / مشترك' : 'General / Core');
+
+              // Localize grades and book types based on the books inside the subject
+              const localizedGrades = Array.from(new Set(
+                (s.books || []).map(b => b.gradeI18n?.[locale] || b.gradeI18n?.en || b.grade || '')
+              )).filter(Boolean);
+
+              const localizedTypes = Array.from(new Set(
+                (s.books || []).map(b => b.typeI18n?.[locale] || b.typeI18n?.en || b.type || '')
+              )).filter(Boolean);
+
               return (
                 <Card key={s.slug} className="overflow-hidden card-lift flex flex-col justify-between min-h-[280px]">
                   <div>
@@ -93,7 +220,7 @@ export default function SubjectsScreen() {
                           {name}
                         </div>
                         <div className="text-[11px] text-slate-500 mt-1 capitalize font-medium">
-                          {s.tracks.length > 0 ? s.tracks.join(' · ') : (isAR ? 'عام / مشترك' : 'General / Core')}
+                          {trackLabel}
                         </div>
                       </div>
                     </div>
@@ -122,34 +249,34 @@ export default function SubjectsScreen() {
                         </div>
                       )}
 
-                      {s.grades && s.grades.length > 0 && (
+                      {localizedGrades.length > 0 && (
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide min-w-[75px]">
                             {isAR ? 'الصفوف:' : 'Grades:'}
                           </span>
                           <div className="flex gap-1 flex-wrap">
-                            {s.grades.map((g) => (
-                              <span key={g} className="px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 font-bold text-[9.5px] uppercase">
-                                {g.toUpperCase()}
+                            {localizedGrades.map((g) => (
+                              <span key={g} className="px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 font-bold text-[9.5px]">
+                                {g}
                               </span>
                             ))}
                           </div>
                         </div>
                       )}
 
-                      {s.types && s.types.length > 0 && (
+                      {localizedTypes.length > 0 && (
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide min-w-[75px]">
                             {isAR ? 'أنواع الكتب:' : 'Book Types:'}
                           </span>
                           <div className="flex gap-1 flex-wrap max-w-full">
-                            {s.types.slice(0, 4).map((t) => (
+                            {localizedTypes.slice(0, 4).map((t) => (
                               <span key={t} className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-750 font-bold text-[9.5px] truncate max-w-[130px]" title={t}>
                                 {t}
                               </span>
                             ))}
-                            {s.types.length > 4 && (
-                              <span className="text-[9.5px] text-slate-400 font-bold">+{s.types.length - 4}</span>
+                            {localizedTypes.length > 4 && (
+                              <span className="text-[9.5px] text-slate-400 font-bold">+{localizedTypes.length - 4}</span>
                             )}
                           </div>
                         </div>
@@ -188,12 +315,16 @@ export default function SubjectsScreen() {
                                   <div className="min-w-0 flex-1">
                                     <p className="text-[12px] font-bold text-slate-700 truncate">{bookTitleStr}</p>
                                     <div className="flex gap-1.5 mt-1 items-center flex-wrap">
-                                      <span className="text-[9.5px] font-bold px-1 py-0.25 bg-slate-100 text-slate-600 rounded uppercase">
+                                      <span className="text-[9.5px] font-bold px-1 py-0.25 bg-slate-100 text-slate-650 rounded uppercase">
                                         {b.language}
                                       </span>
-                                      <span className="text-[9.5px] font-semibold text-slate-400 capitalize truncate max-w-[120px]">{b.type}</span>
+                                      <span className="text-[9.5px] font-semibold text-slate-400 truncate max-w-[120px]">
+                                        {b.typeI18n?.[locale] || b.typeI18n?.en || b.type}
+                                      </span>
                                       <span className="text-[9.5px] font-medium text-slate-300">·</span>
-                                      <span className="text-[9.5px] font-bold text-sky-600 uppercase">{b.grade}</span>
+                                      <span className="text-[9.5px] font-bold text-sky-600">
+                                        {b.gradeI18n?.[locale] || b.gradeI18n?.en || b.grade}
+                                      </span>
                                     </div>
                                   </div>
                                   <span className="text-slate-400 text-xs shrink-0 select-none">{locale === 'ar' ? '◀' : '▶'}</span>

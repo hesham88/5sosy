@@ -14,7 +14,7 @@ export type Subject = {
   languages?: string[];
   grades?: string[];
   types?: string[];
-  books?: Array<{ id: string; title: string; titleI18n?: Record<string, string>; language?: string; grade?: string; type?: string }>;
+  books?: Array<{ id: string; title: string; titleI18n?: Record<string, string>; language?: string; grade?: string; gradeI18n?: Record<string, string>; type?: string; typeI18n?: Record<string, string> }>;
 };
 
 export type Grade = 'g1' | 'g2' | 'g3';

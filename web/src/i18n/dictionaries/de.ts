@@ -64,7 +64,20 @@ const dict = {
     takeQuiz: 'Quiz starten',
     allSubjects: 'Alle Fächer',
     onlyTrack: 'Nur mein Zweig',
-    none: 'Noch keine Fächer — schließe zuerst das Onboarding ab.'
+    none: 'Noch keine Fächer — schließe zuerst das Onboarding ab.',
+    searchPlaceholder: 'Fächer, Bücher, Klassen, Typen suchen…',
+    searchBtn: 'Suchen',
+    filtersTitle: 'Filter',
+    gradeLabel: 'Klasse',
+    typeLabel: 'Typ',
+    languageLabel: 'Sprache',
+    trackLabel: 'Zweig',
+    allGrades: 'Alle Klassen',
+    allTypes: 'Alle Typen',
+    allLanguages: 'Alle Sprachen',
+    allTracks: 'Alle Zweige',
+    resetFilters: 'Zurücksetzen',
+    noMatch: 'Keine Fächer entsprechen Ihrer Suche.'
   },
   plan: {
     title: 'Dein Wochenplan',

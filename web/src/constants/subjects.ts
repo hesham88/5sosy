@@ -38,6 +38,14 @@ export type SubjectMetaItem = {
   };
 };
 
+// Localized labels for the Thanaweya academic tracks. Subject docs store the raw
+// track codes (sci_sci / sci_math / lit); UI must never render the raw code.
+export const TRACK_LABELS: Record<string, { ar: string; en: string }> = {
+  sci_sci:  { ar: 'علمي علوم',  en: 'Science' },
+  sci_math: { ar: 'علمي رياضة', en: 'Mathematics' },
+  lit:      { ar: 'أدبي',       en: 'Literary' },
+};
+
 export const SUBJECT_META: Record<string, SubjectMetaItem> = {
   'agriculture_entrepreneurship': {
     ar: "مهارات الزراعة وريادة الاعمال",

@@ -64,7 +64,20 @@ const dict = {
     takeQuiz: '开始测验',
     allSubjects: '所有学科',
     onlyTrack: '仅我的方向',
-    none: '还没有学科 — 请先完成入门设置。'
+    none: '还没有学科 — 请先完成入门设置。',
+    searchPlaceholder: '搜索科目、书籍、年级、类型…',
+    searchBtn: '搜索',
+    filtersTitle: '筛选',
+    gradeLabel: '年级',
+    typeLabel: '类型',
+    languageLabel: '语言',
+    trackLabel: '方向',
+    allGrades: '所有年级',
+    allTypes: '所有类型',
+    allLanguages: '所有语言',
+    allTracks: '所有方向',
+    resetFilters: '重置',
+    noMatch: '没有符合您搜索的科目。'
   },
   plan: {
     title: '你的每周计划',

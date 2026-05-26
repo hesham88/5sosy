@@ -64,7 +64,20 @@ const dict = {
     takeQuiz: 'Passer le quiz',
     allSubjects: 'Toutes les matières',
     onlyTrack: 'Ma filière seulement',
-    none: 'Aucune matière pour l’instant — terminez d’abord l’intégration.'
+    none: 'Aucune matière pour l’instant — terminez d’abord l’intégration.',
+    searchPlaceholder: 'Rechercher matières, livres, niveaux, types…',
+    searchBtn: 'Rechercher',
+    filtersTitle: 'Filtres',
+    gradeLabel: 'Niveau',
+    typeLabel: 'Type',
+    languageLabel: 'Langue',
+    trackLabel: 'Filière',
+    allGrades: 'Tous les niveaux',
+    allTypes: 'Tous les types',
+    allLanguages: 'Toutes les langues',
+    allTracks: 'Toutes les filières',
+    resetFilters: 'Réinitialiser',
+    noMatch: 'Aucune matière ne correspond à votre recherche.'
   },
   plan: {
     title: 'Votre plan de la semaine',

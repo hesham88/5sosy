@@ -64,7 +64,20 @@ const dict = {
     takeQuiz: 'Fai il quiz',
     allSubjects: 'Tutte le materie',
     onlyTrack: 'Solo il mio indirizzo',
-    none: 'Ancora nessuna materia — completa prima l’onboarding.'
+    none: 'Ancora nessuna materia — completa prima l’onboarding.',
+    searchPlaceholder: 'Cerca materie, libri, classi, tipi…',
+    searchBtn: 'Cerca',
+    filtersTitle: 'Filtri',
+    gradeLabel: 'Classe',
+    typeLabel: 'Tipo',
+    languageLabel: 'Lingua',
+    trackLabel: 'Indirizzo',
+    allGrades: 'Tutte le classi',
+    allTypes: 'Tutti i tipi',
+    allLanguages: 'Tutte le lingue',
+    allTracks: 'Tutti gli indirizzi',
+    resetFilters: 'Reimposta',
+    noMatch: 'Nessuna materia corrisponde alla tua ricerca.'
   },
   plan: {
     title: 'Il tuo piano settimanale',

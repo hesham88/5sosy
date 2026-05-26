@@ -25,7 +25,9 @@ export async function GET() {
               titleI18n: '$titleI18n',
               language: '$language',
               grade: '$grade',
-              type: '$type'
+              gradeI18n: '$gradeI18n',
+              type: '$type',
+              typeI18n: '$typeI18n'
             }
           }
         }
@@ -37,7 +39,7 @@ export async function GET() {
       languages: string[];
       grades: string[];
       types: string[];
-      books: Array<{ id: string; title: string; titleI18n?: Record<string, string>; language?: string; grade?: string; type?: string }>;
+      books: Array<{ id: string; title: string; titleI18n?: Record<string, string>; language?: string; grade?: string; gradeI18n?: Record<string, string>; type?: string; typeI18n?: Record<string, string> }>;
     }> = {};
 
     for (const item of subjectBookDetails) {
@@ -53,7 +55,9 @@ export async function GET() {
           titleI18n: b.titleI18n,
           language: b.language,
           grade: b.grade,
-          type: b.type
+          gradeI18n: b.gradeI18n,
+          type: b.type,
+          typeI18n: b.typeI18n
         }));
 
         subjectMap[slug] = {

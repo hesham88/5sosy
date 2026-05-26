@@ -64,7 +64,20 @@ const dict = {
     takeQuiz: 'Take quiz',
     allSubjects: 'All subjects',
     onlyTrack: 'My track only',
-    none: 'No subjects yet — finish onboarding first.'
+    none: 'No subjects yet — finish onboarding first.',
+    searchPlaceholder: 'Search subjects, books, grades, types…',
+    searchBtn: 'Search',
+    filtersTitle: 'Filters',
+    gradeLabel: 'Grade',
+    typeLabel: 'Type',
+    languageLabel: 'Language',
+    trackLabel: 'Track',
+    allGrades: 'All grades',
+    allTypes: 'All types',
+    allLanguages: 'All languages',
+    allTracks: 'All tracks',
+    resetFilters: 'Reset',
+    noMatch: 'No subjects match your search.'
   },
   plan: {
     title: 'Your week plan',
