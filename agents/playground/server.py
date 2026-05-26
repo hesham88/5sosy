@@ -1514,6 +1514,69 @@ def cosine_similarity(v1, v2):
         return 0.0
     return dot_product(v1, v2) / (mag1 * mag2)
 
+
+def _search_tokens(query: str) -> list[str]:
+    """Expand a query into searchable tokens for the Atlas full-text pass.
+    Splits on whitespace, also de-possessives ("Planck's" -> "Planck") and
+    splits hyphen/slash compounds ("right-hand" -> "right","hand") so a page
+    that wrote the variant still matches. De-duped, order preserved."""
+    import re as _re
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def add(tok: str) -> None:
+        tok = tok.strip()
+        if len(tok) >= 2 and tok.lower() not in seen:
+            seen.add(tok.lower())
+            out.append(tok)
+
+    for t in [w for w in _re.split(r"\s+", query.strip()) if w]:
+        add(t)
+        base = _re.sub(r"['’]s$", "", t)  # trailing 's / 's
+        if base != t:
+            add(base)
+        for part in _re.split(r"[-/]", t):
+            add(part)
+    return out or [query.strip()]
+
+
+def _merge_hybrid(exact: list[dict], semantic: list[dict], limit: int) -> list[dict]:
+    """Blend exact (BM25) and semantic (cosine) hits into one ranking. The two
+    score scales differ, so min-max normalize each list to [0,1], then combine
+    (exact weighted a touch higher to keep precise full-text matches on top) and
+    boost pages that BOTH passes found. Dedupe by (bookId, pageNumber)."""
+    def norm(items: list[dict]) -> dict:
+        if not items:
+            return {}
+        scores = [float(i.get("score") or 0) for i in items]
+        lo, hi = min(scores), max(scores)
+
+        def nv(s: float) -> float:
+            return 1.0 if hi == lo else (s - lo) / (hi - lo)
+
+        return {
+            (i.get("bookId"), i.get("pageNumber")): (i, nv(float(i.get("score") or 0)))
+            for i in items
+        }
+
+    ex, se = norm(exact), norm(semantic)
+    keys = list(ex.keys()) + [k for k in se.keys() if k not in ex]
+    merged: list[dict] = []
+    for k in keys:
+        ei, en = ex.get(k, (None, 0.0))
+        si, sn = se.get(k, (None, 0.0))
+        item = dict(ei or si or {})
+        combined = 0.55 * en + 0.45 * sn
+        if ei and si:
+            combined += 0.15  # found by both passes → strong signal
+        item["score"] = round(min(1.0, combined), 4)
+        if not item.get("text") and si and si.get("text"):
+            item["text"] = si["text"]
+        merged.append(item)
+    merged.sort(key=lambda x: x["score"], reverse=True)
+    return merged[:limit]
+
+
 @app.post("/v1/books/search")
 async def books_search(req: SearchRequest, x_api_key: str | None = Header(default=None, alias="X-API-Key")) -> dict:
     _require_api_key(x_api_key)
@@ -1551,26 +1614,28 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
                 return out
 
             atlas_ok = False
-            # Fast path: Atlas Search full-text index ($search). Require EVERY query
-            # word (compound.must = AND) for precision + BM25 relevance ranking —
-            # this restores the accuracy of the old token-AND regex but indexed/fast.
-            # Fuzzy is ONLY a rescue when the precise pass finds nothing, so typos
-            # still work yet never pollute the ranking with loose matches.
+            # Atlas Search full-text index ($search). Use compound.should with
+            # minimumShouldMatch=1 (OR) so a page matching ANY query token still
+            # surfaces — BM25 then ranks pages that hit more tokens higher. This
+            # is the recall half; in smart mode it's blended with semantic below,
+            # so partial/variant matches no longer get dropped. Fuzzy is a rescue
+            # when the precise pass finds nothing (typos + "did you mean").
+            cand = max(req.limit * 3, 30)
             try:
-                words = [w for w in _re.split(r"\s+", req.query.strip()) if len(w) >= 2] or [req.query.strip()]
+                words = _search_tokens(req.query)
 
                 def _run(fuzzy: bool):
-                    must = [
+                    should = [
                         {"text": {"query": w, "path": "text",
                                   **({"fuzzy": {"maxEdits": 1, "prefixLength": 3}} if fuzzy else {})}}
                         for w in words
                     ]
-                    comp: dict = {"must": must}
+                    comp: dict = {"should": should, "minimumShouldMatch": 1}
                     if req.bookId:
                         comp["filter"] = [{"equals": {"path": "bookId", "value": req.bookId}}]
                     pipeline = [
                         {"$search": {"index": os.getenv("MONGO_TEXT_INDEX", "text_index"), "compound": comp}},
-                        {"$limit": req.limit},
+                        {"$limit": cand},
                         {"$project": {"_id": 0, "text": 1, "bookId": 1, "bookTitle": 1, "pageNumber": 1,
                                       "grade": 1, "subject": 1, "language": 1, "year": 1,
                                       "score": {"$meta": "searchScore"}}},
@@ -1638,7 +1703,10 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
             except Exception as e:
                 print(f"Firestore exact search failed: {e}")
 
-    if req.mode == "semantic" or (req.mode == "smart" and not results):
+    # Exact hits captured above; keep them so smart mode can blend with semantic.
+    exact_results = list(results)
+
+    if req.mode in ("semantic", "smart"):
         # Semantic search — embed the query, then prefer Atlas $vectorSearch
         # (indexed, fast). Only fall back to the in-memory cosine cache if the
         # vector index is missing/erroring, since that path scans every page
@@ -1654,6 +1722,11 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
                 raise HTTPException(status_code=500, detail="Failed to get embedding")
             query_emb = list(embs[0].values)
         except Exception as e:
+            # In smart mode the embedding is one half of a hybrid — if it fails
+            # but the exact pass already found pages, return those rather than
+            # 500-ing the whole search. Only a pure semantic request hard-fails.
+            if req.mode == "smart" and exact_results:
+                return {"results": await _resolve_book_titles(exact_results[:req.limit]), "engine": "exact-only", "didYouMean": did_you_mean}
             raise HTTPException(status_code=500, detail=f"Failed to generate query embedding: {e}")
 
         top_matches = []
@@ -1668,7 +1741,7 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
                     "path": "embedding",
                     "queryVector": query_emb,
                     "numCandidates": max(150, req.limit * 20),
-                    "limit": req.limit,
+                    "limit": max(req.limit * 3, 30),
                 }
                 if req.bookId:
                     vs["filter"] = {"bookId": req.bookId}
@@ -1701,7 +1774,10 @@ async def books_search(req: SearchRequest, x_api_key: str | None = Header(defaul
                 print(f"$vectorSearch unavailable, falling back to in-memory cosine: {e}")
 
         if used_vector_search:
-            return {"results": await _resolve_book_titles(top_matches), "engine": "vectorSearch", "didYouMean": did_you_mean}
+            if req.mode == "smart":
+                merged = _merge_hybrid(exact_results, top_matches, req.limit)
+                return {"results": await _resolve_book_titles(merged), "engine": "hybrid", "didYouMean": did_you_mean}
+            return {"results": await _resolve_book_titles(top_matches[:req.limit]), "engine": "vectorSearch", "didYouMean": did_you_mean}
 
         # On MongoDB, never run the full-collection in-memory cosine — it OOMs the
         # container (503). $vectorSearch is the semantic path; while the Atlas index

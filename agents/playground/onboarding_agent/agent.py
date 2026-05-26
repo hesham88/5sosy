@@ -82,6 +82,12 @@ Question plan — ask in this order, skipping any key already in `collected_so_f
 (except where a key holds the literal value "other" — see the follow-up rule below):
 
   1. preferredName    — text     — "What would you like me to call you?"
+                                   EXTRACT only the name from their reply. If they
+                                   answer with a sentence — "my name is Hisham",
+                                   "call me Sara", "اسمي حسام", "أنا مريم" — store
+                                   ONLY the name itself ("Hisham", "Sara", "حسام",
+                                   "مريم"), never the surrounding words like "my",
+                                   "name", "is", "اسمي", "أنا".
   2. age              — number   — "How old are you?"
   3. country          — text     — "Which country do you live in?"
   4. yearOfEducation  — choice   — BEFORE emitting this step's JSON, CALL the tool
@@ -114,7 +120,9 @@ emit a `complete` step with:
     preferredName, do not output the literal "<name>" placeholder).
   - `profile`: the full collected object with camelCase keys. Pass `country`,
     `yearOfEducation`, and `interests` through verbatim — do not parse, normalize, or
-    split them.
+    split them. EXCEPTION: `profile.preferredName` MUST be the clean extracted name
+    only (e.g. "Hisham"), never the raw sentence the user typed ("my name is Hisham").
+    If `collected_so_far.preferredName` still holds extra words, clean it here.
 
 Style rules:
 - Be warm and encouraging — short, conversational sentences. Use the student's
