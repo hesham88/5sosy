@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChromeLayout } from '../shared/Chrome';
 import { useApp } from '../shared/Providers';
@@ -25,6 +25,9 @@ export default function SubjectsScreen() {
   const [typeFilter, setTypeFilter] = useState('all');
   const [languageFilter, setLanguageFilter] = useState('all');
   const [trackFilter, setTrackFilter] = useState('all');
+  // Semantic (content-level) search results from the backend, keyed by subject slug.
+  const [semantic, setSemantic] = useState<{ query: string; map: Record<string, number> } | null>(null);
+  const [semanticLoading, setSemanticLoading] = useState(false);
 
   const activeTrack = profile?.track || 'sci_sci';
 
@@ -128,6 +131,76 @@ export default function SubjectsScreen() {
     });
   }, [subjects, visible, hasActiveFilters, q, gradeFilter, typeFilter, languageFilter, trackFilter]);
 
+  // Backend semantic search: finds subjects whose page CONTENT matches the query
+  // (not just metadata). Triggered on submit (Enter) to keep it off the keystroke
+  // hot path. Honours the active grade/language filters as pre-filters.
+  const runSemanticSearch = useCallback(
+    async (query: string) => {
+      const qq = query.trim();
+      if (qq.length < 3) {
+        setSemantic(null);
+        return;
+      }
+      setSemanticLoading(true);
+      try {
+        const res = await fetch('/api/subjects/search', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            query: qq,
+            limit: 16,
+            grade: gradeFilter !== 'all' ? gradeFilter : undefined,
+            language: languageFilter !== 'all' ? languageFilter : undefined,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const map: Record<string, number> = {};
+          (data.results || []).forEach((r: { slug: string; score: number }) => {
+            map[r.slug] = r.score;
+          });
+          setSemantic({ query: qq, map });
+        }
+      } catch {
+        /* semantic is best-effort; client filter already covers the basics */
+      } finally {
+        setSemanticLoading(false);
+      }
+    },
+    [gradeFilter, languageFilter]
+  );
+
+  // Drop stale semantic results once the query no longer matches what produced them.
+  useEffect(() => {
+    if (semantic && semantic.query !== q.trim()) setSemantic(null);
+  }, [q, semantic]);
+
+  const passesDropdowns = useCallback(
+    (s: Subject) => {
+      if (trackFilter !== 'all' && !s.tracks.includes(trackFilter)) return false;
+      if (languageFilter !== 'all' && !(s.languages || []).includes(languageFilter)) return false;
+      if (gradeFilter !== 'all' && !(s.books || []).some((b) => b.grade === gradeFilter)) return false;
+      if (typeFilter !== 'all' && !(s.books || []).some((b) => b.type === typeFilter)) return false;
+      return true;
+    },
+    [trackFilter, languageFilter, gradeFilter, typeFilter]
+  );
+
+  // Merge instant client matches with content matches from the backend. Subjects
+  // matched semantically (but missed by the metadata substring pass) are added if
+  // they pass the dropdown filters; the list is ordered by semantic score first.
+  const finalList = useMemo(() => {
+    const sem = semantic && semantic.query === q.trim() ? semantic.map : null;
+    if (!sem) return displayed;
+    const bySlug = new Map(displayed.map((s) => [s.slug, s]));
+    for (const slug of Object.keys(sem)) {
+      if (bySlug.has(slug)) continue;
+      const subj = subjects.find((s) => s.slug === slug);
+      if (subj && passesDropdowns(subj)) bySlug.set(slug, subj);
+    }
+    return Array.from(bySlug.values()).sort((a, b) => (sem[b.slug] || 0) - (sem[a.slug] || 0));
+  }, [displayed, semantic, q, subjects, passesDropdowns]);
+
   return (
     <ChromeLayout>
       <div className="px-5 lg:px-10 py-6 lg:py-8 max-w-[1400px]">
@@ -172,6 +245,8 @@ export default function SubjectsScreen() {
             trackOptions={trackOptions}
             hasActiveFilters={hasActiveFilters}
             onReset={resetFilters}
+            onSubmit={() => runSemanticSearch(q)}
+            searching={semanticLoading}
           />
         )}
 
@@ -182,11 +257,11 @@ export default function SubjectsScreen() {
               {isAR ? 'جاري تحميل المواد الدراسية...' : 'Loading subjects...'}
             </p>
           </div>
-        ) : displayed.length === 0 ? (
+        ) : finalList.length === 0 ? (
           <Card className="p-8 text-center text-slate-500">{hasActiveFilters ? t.subjects.noMatch : t.subjects.none}</Card>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-5">
-            {displayed.map((s) => {
+            {finalList.map((s) => {
               const meta = SUBJECT_META[s.slug] || { hue: 'stone', glyph: '📚' };
               const h = HUE[meta.hue as HueId] || HUE.stone;
               // SUBJECT_META carries all 7 locales and is the authoritative source for

@@ -36,6 +36,8 @@ type Props = {
   trackOptions: Option[];
   hasActiveFilters: boolean;
   onReset: () => void;
+  onSubmit?: () => void;
+  searching?: boolean;
 };
 
 function Select({
@@ -89,6 +91,8 @@ export default function SubjectFilters({
   trackOptions,
   hasActiveFilters,
   onReset,
+  onSubmit,
+  searching,
 }: Props) {
   return (
     <div className="mb-6 rounded-2xl border border-slate-200 bg-white shadow-sm p-4 lg:p-5 space-y-4">
@@ -99,9 +103,13 @@ export default function SubjectFilters({
           type="text"
           value={q}
           onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') onSubmit?.(); }}
           placeholder={t.searchPlaceholder}
           className="flex-1 bg-transparent border-none text-[13.5px] text-slate-800 focus:outline-none py-1.5 min-w-0"
         />
+        {searching && (
+          <span className="w-4 h-4 me-1 border-2 border-sky-200 border-t-sky-600 rounded-full animate-spin shrink-0" />
+        )}
         {q && (
           <button
             onClick={() => setQ('')}
@@ -111,6 +119,12 @@ export default function SubjectFilters({
             ✕
           </button>
         )}
+        <button
+          onClick={() => onSubmit?.()}
+          className="bg-sky-600 hover:bg-sky-700 text-white font-extrabold text-[12.5px] px-4 py-2 rounded-lg transition shadow-sm whitespace-nowrap"
+        >
+          {t.searchBtn}
+        </button>
       </div>
 
       {/* Multi-attribute filters */}

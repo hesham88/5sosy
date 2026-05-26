@@ -1446,6 +1446,134 @@ async def merge_duplicate_subjects(
     return await loop.run_in_executor(None, lambda: _merge_duplicate_subjects(req.dry_run))
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Subject semantic search (Batch 2, Part 3b). Hybrid retrieval over book_pages
+# grouped up to subject level, so a content query ("photosynthesis") surfaces the
+# subjects/books whose pages teach it even when the title doesn't match. Low
+# latency by design: a single embed + one Atlas $vectorSearch, deterministic
+# query cleaning (NO LLM in the hot path), grade pre-filter via the index and a
+# cheap language post-filter. The browser's instant client-side filter (Part 3a)
+# stays the primary path; this augments it with content-level recall.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SubjectSearchRequest(BaseModel):
+    query: str
+    limit: int = 12
+    grade: str | None = None
+    language: str | None = None
+
+
+@app.post("/v1/subjects/search")
+async def subjects_search(
+    req: SubjectSearchRequest,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> dict:
+    _require_api_key(x_api_key)
+    if os.getenv("DATABASE_PROVIDER", "firestore").lower() != "mongodb":
+        raise HTTPException(status_code=400, detail="subject search requires DATABASE_PROVIDER=mongodb")
+
+    _, _, cleaned = _query_terms(req.query)
+    if not cleaned:
+        return {"results": [], "engine": "empty"}
+
+    # 1) Embed the cleaned query (reuse the page-embedding model so vectors align).
+    try:
+        client = genai.Client()
+        response = await client.aio.models.embed_content(
+            model="models/gemini-embedding-2", contents=cleaned
+        )
+        embs = response.embeddings
+        if not embs or not embs[0].values:
+            raise HTTPException(status_code=500, detail="failed to embed query")
+        query_emb = list(embs[0].values)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to embed query: {e}")
+
+    # 2) One Atlas $vectorSearch over book_pages. NOTE: book_pages docs do NOT carry
+    # subject/grade (those live on the `books` collection), so we can't pre-filter
+    # in-index — retrieve top candidates, then resolve + filter via `books`.
+    from shared.mongodb_client import get_mongodb_client
+    _, mongo_db = get_mongodb_client()
+    loop = asyncio.get_running_loop()
+    pipeline = [
+        {"$vectorSearch": {
+            "index": os.getenv("MONGO_VECTOR_INDEX", "vector_index"),
+            "path": "embedding",
+            "queryVector": query_emb,
+            "numCandidates": 400,
+            "limit": 150,
+        }},
+        {"$project": {"_id": 0, "bookId": 1, "pageNumber": 1, "score": {"$meta": "vectorSearchScore"}}},
+    ]
+    try:
+        docs = await loop.run_in_executor(
+            None, lambda: list(mongo_db["book_pages"].aggregate(pipeline))
+        )
+    except Exception as e:
+        print(f"subjects_search: vectorSearch failed: {e}")
+        raise HTTPException(status_code=503, detail="search index unavailable")
+
+    # 3) Resolve bookId → {subject, grade, type, language} from `books` in one batch.
+    ids = list({d.get("bookId") for d in docs if d.get("bookId")})
+    if not ids:
+        return {"results": [], "engine": "vectorSearch", "cleanedQuery": cleaned}
+    books = await loop.run_in_executor(
+        None,
+        lambda: list(mongo_db["books"].find(
+            {"_id": {"$in": ids}},
+            {"subject": 1, "grade": 1, "type": 1, "language": 1},
+        )),
+    )
+    bmeta = {b.get("_id"): b for b in books}
+
+    # 4) Apply grade/language post-filters (from the resolved book) and group to subject.
+    grade = req.grade
+    lang = (req.language or "").lower()
+    agg: dict[str, dict] = {}
+    for d in docs:
+        b = bmeta.get(d.get("bookId"))
+        if not b:
+            continue
+        slug = b.get("subject")
+        if not slug:
+            continue
+        if grade and b.get("grade") != grade:
+            continue
+        if lang and (b.get("language") or "").lower() != lang:
+            continue
+        score = float(d.get("score", 0))
+        a = agg.setdefault(slug, {"slug": slug, "score": 0.0, "hits": 0, "bookIds": set(), "grades": set()})
+        a["score"] += score
+        a["hits"] += 1
+        a["bookIds"].add(d["bookId"])
+        if b.get("grade"):
+            a["grades"].add(b["grade"])
+
+    if not agg:
+        return {"results": [], "engine": "vectorSearch", "cleanedQuery": cleaned}
+
+    # 4) Normalize subject scores to 0..1 and rank.
+    smax = max(a["score"] for a in agg.values()) or 1.0
+    results = sorted(
+        (
+            {
+                "slug": a["slug"],
+                "score": round(a["score"] / smax, 4),
+                "hits": a["hits"],
+                "bookIds": sorted(a["bookIds"]),
+                "grades": sorted(a["grades"]),
+            }
+            for a in agg.values()
+        ),
+        key=lambda r: r["score"],
+        reverse=True,
+    )[: req.limit]
+
+    return {"results": results, "engine": "vectorSearch", "cleanedQuery": cleaned}
+
+
 # In-memory cache for page embeddings
 _pages_cache: list[dict] = []
 _cache_loaded: bool = False
