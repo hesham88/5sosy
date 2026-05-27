@@ -1751,6 +1751,303 @@ async def subjects_search(
     return result
 
 
+# ── Single-subject page endpoints (Batch 2 finalization) ─────────────────────
+# Three additive endpoints powering the per-subject page: a filter-aware concept
+# list, a concept-graph mind map, and a subject-scoped RAG tutor that prioritises
+# the student's core book. All read the graph/pages the mind-map + reconcile jobs
+# already built; none mutate existing handlers.
+
+class SubjectConceptsRequest(BaseModel):
+    slug: str
+    grade: str | None = None
+    language: str | None = None
+    limit: int = 40
+
+
+class SubjectMindmapRequest(BaseModel):
+    slug: str
+    grade: str | None = None
+    language: str | None = None
+    limit: int = 12
+
+
+class SubjectAskRequest(BaseModel):
+    slug: str
+    question: str
+    grade: str | None = None
+    language: str | None = None
+    locale: str = "ar"
+    history: list[dict] = []
+    sessionId: str | None = None
+
+
+def _subject_concept_pipeline(slug: str, grade: str | None, language: str | None, limit: int) -> list[dict]:
+    """Aggregate concept_occurrences for one subject into filter-aware concept
+    rows (count + sample page/book + grade/language spread), ranked by frequency."""
+    match: dict = {"subject": slug}
+    if grade:
+        match["grade"] = grade
+    if language:
+        match["language"] = language
+    return [
+        {"$match": match},
+        {"$group": {
+            "_id": "$conceptId",
+            "count": {"$sum": 1},
+            "grades": {"$addToSet": "$grade"},
+            "languages": {"$addToSet": "$language"},
+            "bookIds": {"$addToSet": "$bookId"},
+            "samplePage": {"$first": "$pageNumber"},
+            "sampleBook": {"$first": "$bookId"},
+        }},
+        {"$sort": {"count": -1}},
+        {"$limit": limit},
+    ]
+
+
+@app.post("/v1/subjects/concepts")
+async def subjects_concepts(
+    req: SubjectConceptsRequest,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> dict:
+    _require_api_key(x_api_key)
+    if os.getenv("DATABASE_PROVIDER", "firestore").lower() != "mongodb":
+        raise HTTPException(status_code=400, detail="subject concepts require DATABASE_PROVIDER=mongodb")
+    from shared.mongodb_client import get_mongodb_client
+    _, mdb = get_mongodb_client()
+    loop = asyncio.get_running_loop()
+
+    pipeline = _subject_concept_pipeline(req.slug, req.grade, req.language, req.limit)
+    rows = await loop.run_in_executor(None, lambda: list(mdb["concept_occurrences"].aggregate(pipeline)))
+    if not rows:
+        return {"slug": req.slug, "concepts": []}
+
+    ids = [r["_id"] for r in rows]
+    node_docs = await loop.run_in_executor(
+        None,
+        lambda: list(mdb["concept_nodes"].find(
+            {"_id": {"$in": ids}},
+            {"label": 1, "keywords": 1, "nameI18n": 1, "descriptionI18n": 1},
+        )),
+    )
+    nodes = {n["_id"]: n for n in node_docs}
+
+    concepts = []
+    for r in rows:
+        n = nodes.get(r["_id"], {})
+        concepts.append({
+            "conceptId": r["_id"],
+            "label": n.get("label") or str(r["_id"]).split("::")[-1],
+            "keywords": (n.get("keywords") or [])[:6],
+            "count": r["count"],
+            "grades": sorted(g for g in r.get("grades", []) if g),
+            "languages": sorted(l for l in r.get("languages", []) if l),
+            "bookCount": len([b for b in r.get("bookIds", []) if b]),
+            "samplePage": r.get("samplePage"),
+            "sampleBookId": r.get("sampleBook"),
+            # Passthrough for a future enrichment job (concept_nodes.nameI18n /
+            # .descriptionI18n in the 7 locales) — UI shows them once present.
+            "nameI18n": n.get("nameI18n"),
+            "descriptionI18n": n.get("descriptionI18n"),
+        })
+    return {"slug": req.slug, "concepts": concepts}
+
+
+@app.post("/v1/subjects/mindmap")
+async def subjects_mindmap(
+    req: SubjectMindmapRequest,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> dict:
+    _require_api_key(x_api_key)
+    if os.getenv("DATABASE_PROVIDER", "firestore").lower() != "mongodb":
+        raise HTTPException(status_code=400, detail="subject mindmap requires DATABASE_PROVIDER=mongodb")
+    from shared.mongodb_client import get_mongodb_client
+    _, mdb = get_mongodb_client()
+    loop = asyncio.get_running_loop()
+
+    pipeline = _subject_concept_pipeline(req.slug, req.grade, req.language, req.limit)
+    rows = await loop.run_in_executor(None, lambda: list(mdb["concept_occurrences"].aggregate(pipeline)))
+    if not rows:
+        return {"status": "empty", "mindmap": None, "slug": req.slug}
+
+    await _ensure_concept_cache()
+    id_to_label = dict(zip(_concept_cache["ids"], _concept_cache["labels"]))
+
+    def _label(cid: str) -> str:
+        return id_to_label.get(cid) or str(cid).split("::")[-1]
+
+    # Lineage edges give each top concept a few related child concepts → a 2-level tree.
+    ids = [r["_id"] for r in rows]
+    edge_docs = await loop.run_in_executor(
+        None,
+        lambda: list(mdb["concept_edges"].find(
+            {"subject": req.slug, "from": {"$in": ids}},
+            {"from": 1, "to": 1, "score": 1},
+        )),
+    )
+    edges_by_from: dict[str, list] = {}
+    for e in edge_docs:
+        edges_by_from.setdefault(e["from"], []).append(e)
+
+    children = []
+    for r in rows:
+        cid = r["_id"]
+        related = sorted(edges_by_from.get(cid, []), key=lambda e: -(e.get("score") or 0))[:3]
+        sub = [{"title": _label(e["to"])} for e in related if _label(e["to"])]
+        node: dict = {"title": _label(cid)}
+        if r.get("samplePage"):
+            node["page"] = r["samplePage"]
+            node["bookId"] = r.get("sampleBook")
+        if sub:
+            node["children"] = sub
+        children.append(node)
+
+    mindmap = {
+        "title": req.slug,
+        "summary": None,
+        "children": children,
+    }
+    return {"status": "ok", "mindmap": mindmap, "slug": req.slug}
+
+
+async def _retrieve_subject_pages(
+    slug: str, query: str, grade: str | None, language: str | None, k: int = 8,
+) -> list[dict]:
+    """Retrieve the most relevant pages ACROSS a subject's books for a question.
+    Uses an unfiltered $vectorSearch + Python post-filter (so it works regardless
+    of which filter paths the live vector index was built with), then floats the
+    student's core book to the top of the context."""
+    if os.getenv("DATABASE_PROVIDER", "firestore").lower() != "mongodb":
+        return []
+    from shared.mongodb_client import get_mongodb_client
+    _, mdb = get_mongodb_client()
+    loop = asyncio.get_running_loop()
+
+    try:
+        client = genai.Client()
+        emb = await client.aio.models.embed_content(model="models/gemini-embedding-2", contents=query)
+        qv = list(emb.embeddings[0].values)
+    except Exception as e:
+        print(f"subject ask: embed failed: {e}")
+        return []
+
+    pipeline = [
+        {"$vectorSearch": {
+            "index": os.getenv("MONGO_VECTOR_INDEX", "vector_index"),
+            "path": "embedding", "queryVector": qv,
+            "numCandidates": 600, "limit": 200,
+        }},
+        {"$project": {"_id": 0, "bookId": 1, "pageNumber": 1, "text": 1,
+                      "subject": 1, "grade": 1, "language": 1, "bookType": 1,
+                      "score": {"$meta": "vectorSearchScore"}}},
+    ]
+    try:
+        docs = await loop.run_in_executor(None, lambda: list(mdb["book_pages"].aggregate(pipeline)))
+    except Exception as e:
+        print(f"subject ask: vectorSearch failed: {e}")
+        return []
+
+    lang = (language or "").lower()
+    hits = []
+    for d in docs:
+        if d.get("subject") != slug:
+            continue
+        if grade and d.get("grade") != grade:
+            continue
+        if lang and (d.get("language") or "").lower() != lang:
+            continue
+        hits.append(d)
+
+    # Core (student) book pages first, each bucket preserving vector-score order.
+    core = [d for d in hits if (d.get("bookType") or "core") == "core"]
+    supporting = [d for d in hits if (d.get("bookType") or "core") != "core"]
+    ordered = (core + supporting)[:k]
+    return [{
+        "bookId": d.get("bookId"),
+        "pageNumber": d.get("pageNumber"),
+        "text": (d.get("text") or "")[:1500],
+        "bookType": d.get("bookType") or "core",
+    } for d in ordered]
+
+
+@app.post("/v1/subjects/ask")
+async def subjects_ask(
+    req: SubjectAskRequest,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> dict:
+    _require_api_key(x_api_key)
+    import uuid
+    q = req.question.strip()
+    session_id = req.sessionId or uuid.uuid4().hex
+    if not q:
+        return {"answer": "", "citations": [], "sessionId": session_id}
+
+    pages = await _retrieve_subject_pages(req.slug, q, req.grade, req.language, k=8)
+    context = "\n\n".join(
+        f"[Book {p['bookId']} · Page {p['pageNumber']}{' · STUDENT BOOK' if p.get('bookType') == 'core' else ''}]\n{p['text']}"
+        for p in pages if p.get("text")
+    )
+    locale_name = _ASK_LOCALE_NAMES.get(req.locale, "the student's language")
+
+    convo = ""
+    for m in (req.history or [])[-6:]:
+        who = "Student" if m.get("role") == "user" else "Tutor"
+        convo += f"{who}: {m.get('content', '')}\n"
+
+    system = (
+        "You are 5sosy, a warm, expert private tutor for a whole SUBJECT (across several "
+        f"textbooks). Always reply in {locale_name}. Ground every answer ONLY in the BOOK PAGES "
+        "provided; prefer the page(s) marked STUDENT BOOK as the authoritative curriculum, using "
+        "the others only for extra support. If the answer is not in the pages, say so honestly and "
+        "suggest what to search instead — never invent facts, pages, or sources. Cite the pages you "
+        "used inline like [Page N]. Open with a brief direct answer, then a short explanation, and "
+        "end with one inviting follow-up question. Refuse unsafe or off-topic requests politely and "
+        "steer back to the subject."
+    )
+    prompt = (
+        f"{system}\n\nBOOK PAGES:\n{context or '(no relevant pages found)'}\n\n"
+        f"CONVERSATION SO FAR:\n{convo}\nStudent: {q}\nTutor:"
+    )
+
+    try:
+        client = genai.Client()
+        model = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
+        resp = await client.aio.models.generate_content(model=model, contents=prompt)
+        answer = (getattr(resp, "text", None) or "").strip()
+    except Exception as e:
+        print(f"subject ask: generation failed: {e}")
+        raise HTTPException(status_code=502, detail=f"tutor generation failed: {e}")
+
+    citations = [{
+        "bookId": p["bookId"], "pageNumber": p["pageNumber"],
+        "snippet": (p.get("text") or "")[:160],
+    } for p in pages]
+
+    if os.getenv("DATABASE_PROVIDER", "firestore").lower() == "mongodb":
+        try:
+            from datetime import datetime, timezone
+            from shared.mongodb_client import get_mongodb_client
+            _, mongo_db = get_mongodb_client()
+            now = datetime.now(timezone.utc).isoformat()
+            await asyncio.get_running_loop().run_in_executor(
+                None,
+                lambda: mongo_db["subject_chats"].update_one(
+                    {"_id": session_id},
+                    {"$setOnInsert": {"subject": req.slug, "locale": req.locale, "createdAt": now},
+                     "$set": {"updatedAt": now},
+                     "$push": {"messages": {"$each": [
+                         {"role": "user", "content": q, "at": now},
+                         {"role": "assistant", "content": answer, "citations": citations, "at": now},
+                     ]}}},
+                    upsert=True,
+                ),
+            )
+        except Exception as e:
+            print(f"subject ask: save chat failed: {e}")
+
+    return {"answer": answer, "citations": citations, "sessionId": session_id}
+
+
 # In-memory cache for page embeddings
 _pages_cache: list[dict] = []
 _cache_loaded: bool = False

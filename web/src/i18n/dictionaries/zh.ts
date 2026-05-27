@@ -61,6 +61,7 @@ const dict = {
     last: '最近主题',
     drill: '练习',
     openBooks: '打开书籍',
+    openSubject: '打开科目',
     takeQuiz: '开始测验',
     allSubjects: '所有学科',
     onlyTrack: '仅我的方向',
@@ -78,6 +79,55 @@ const dict = {
     allTracks: '所有方向',
     resetFilters: '重置',
     noMatch: '没有符合您搜索的科目。'
+  },
+  subject: {
+    back: '所有科目',
+    books: '本书',
+    soon: '即将推出',
+    search: {
+      placeholder: '在本科目内搜索…',
+      btn: '搜索',
+      noResults: '本科目中没有匹配的页面。'
+    },
+    tabs: {
+      tutor: 'AI 导师',
+      concepts: '概念',
+      mindmap: '思维导图',
+      ingest: '添加书籍',
+      planner: '规划器',
+      performance: '学习表现',
+      assessment: '快速测验',
+      explain: '深度讲解'
+    },
+    tutor: {
+      title: '{subject} AI 导师',
+      sub: '基于你的书籍——优先学生课本',
+      empty: '关于本科目尽管提问。回答会引用确切的书页。',
+      placeholder: '向科目导师提问…'
+    },
+    concepts: {
+      title: '核心概念',
+      sub: '筛选书籍中最重要的概念。点击任一概念向导师提问。',
+      empty: '此筛选条件下暂无概念。',
+      occurrences: '次出现'
+    },
+    mindmap: {
+      title: '概念思维导图',
+      sub: '根据你的筛选，展示本科目概念之间的联系。',
+      generating: '正在生成思维导图…',
+      empty: '此筛选条件下暂无思维导图。'
+    },
+    ingest: {
+      title: '向本科目添加书籍',
+      sub: '上传你自己的资料，我们会将其索引到本科目中。',
+      needFilters: '提示：请在上方选择年级、类型和语言，以便正确归类新书。',
+      uploadCta: '将 PDF 拖到此处或点击选择',
+      defaultType: '若未选择类型，将归为「你的上传」。'
+    },
+    planner: { title: '学习规划器', sub: '规划器代理将为本科目制定并调整你的学习计划。' },
+    performance: { title: '学习表现', sub: '教学代理将跟踪你的掌握程度并指出薄弱点。' },
+    assessment: { title: '快速测验', sub: '测评代理将生成测验和部颁风格的题目。' },
+    explain: { title: '深度讲解', sub: '深度讲解代理将逐步拆解任何主题。' }
   },
   plan: {
     title: '你的每周计划',
@@ -107,6 +157,7 @@ const dict = {
     pages: '页',
     publisher: '出版社',
     year: '年份',
+    type: '类型',
     lastOpened: '上次打开',
     selected: '本书已选',
     selectedPlural: '本书已选',

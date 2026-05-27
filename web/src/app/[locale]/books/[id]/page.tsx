@@ -11,51 +11,7 @@ import { Card, Btn, SubjectChip } from '@/components/shared/atoms';
 import { SUBJECT_META } from '@/constants/subjects';
 import type { Book } from '@/lib/types';
 import { LocaleBlock } from '@/i18n/LocaleBlock';
-
-type MindNode = { title: string; summary?: string; page?: number | null; children?: MindNode[] };
-
-const BRANCH_COLORS = [
-  'border-sky-400 bg-sky-50',
-  'border-amber-400 bg-amber-50',
-  'border-emerald-400 bg-emerald-50',
-  'border-violet-400 bg-violet-50',
-  'border-rose-400 bg-rose-50',
-  'border-cyan-400 bg-cyan-50',
-  'border-orange-400 bg-orange-50',
-  'border-indigo-400 bg-indigo-50',
-];
-
-function MindMapNode({ node, depth, branch, onJump, pageLabel }: {
-  node: MindNode; depth: number; branch: number;
-  onJump: (n: number) => void; pageLabel: (n: number) => string;
-}) {
-  const hasPage = typeof node.page === 'number' && node.page > 0;
-  const color = depth === 1 ? BRANCH_COLORS[branch % BRANCH_COLORS.length] : 'border-slate-200 bg-white';
-  return (
-    <li className="my-1">
-      <div className={`inline-flex items-center gap-2 rounded-xl border ps-3 pe-2 py-1.5 ${color}`}>
-        <span className={`${depth === 0 ? 'text-[15px] font-extrabold' : depth === 1 ? 'text-[13px] font-bold' : 'text-[12.5px] font-medium'} text-slate-800`}>
-          {node.title}
-        </span>
-        {hasPage && (
-          <button
-            onClick={() => onJump(node.page as number)}
-            className="text-[11px] font-bold text-sky-700 bg-white/70 hover:bg-sky-600 hover:text-white rounded-full px-2 py-0.5 border border-sky-200 transition shrink-0"
-          >
-            {pageLabel(node.page as number)}
-          </button>
-        )}
-      </div>
-      {Array.isArray(node.children) && node.children.length > 0 && (
-        <ul className="ms-4 ps-3 border-s border-dashed border-slate-200 mt-1">
-          {node.children.map((c, i) => (
-            <MindMapNode key={i} node={c} depth={depth + 1} branch={depth === 0 ? i : branch} onJump={onJump} pageLabel={pageLabel} />
-          ))}
-        </ul>
-      )}
-    </li>
-  );
-}
+import { MindMapNode, type MindNode } from '@/components/shared/MindMapNode';
 
 export default function Page({ params }: { params: Promise<{ locale: string; id: string }> }) {
   const { locale, id } = use(params);
@@ -388,6 +344,14 @@ export default function Page({ params }: { params: Promise<{ locale: string; id:
             <SubjectChip id={book.subject} size="sm" />
             <h2 className="font-extrabold text-[16px] text-slate-900 leading-snug">{bookTitle(book, locale)}</h2>
             <p className="text-[12px] text-slate-500">{bookSubtitle(book, locale)}</p>
+            {(book.typeI18n?.[locale] || book.typeI18n?.en || book.type) && (
+              <div className="flex items-center gap-2 text-[11px] border-t border-slate-100 pt-3">
+                <span className="font-bold text-slate-400 uppercase tracking-wide">{t.books.type}</span>
+                <span className="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-bold text-[11px]">
+                  {book.typeI18n?.[locale] || book.typeI18n?.en || book.type}
+                </span>
+              </div>
+            )}
             <div className="flex justify-between items-center text-[11px] text-slate-400 border-t border-slate-100 pt-3">
               <span>{book.pages} {t.books.pages}</span>
               <span>{t.books.year} {book.year}</span>

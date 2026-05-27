@@ -61,6 +61,7 @@ const dict = {
     last: 'Last topic',
     drill: 'Drill',
     openBooks: 'Open books',
+    openSubject: 'Open subject',
     takeQuiz: 'Take quiz',
     allSubjects: 'All subjects',
     onlyTrack: 'My track only',
@@ -78,6 +79,55 @@ const dict = {
     allTracks: 'All tracks',
     resetFilters: 'Reset',
     noMatch: 'No subjects match your search.'
+  },
+  subject: {
+    back: 'All subjects',
+    books: 'books',
+    soon: 'Coming soon',
+    search: {
+      placeholder: 'Search inside this subject…',
+      btn: 'Search',
+      noResults: 'No matching pages in this subject.'
+    },
+    tabs: {
+      tutor: 'AI Tutor',
+      concepts: 'Concepts',
+      mindmap: 'Mind map',
+      ingest: 'Add a book',
+      planner: 'Planner',
+      performance: 'Performance',
+      assessment: 'Quick questions',
+      explain: 'Deep explainer'
+    },
+    tutor: {
+      title: '{subject} AI Tutor',
+      sub: 'Grounded in your books — student book first',
+      empty: 'Ask anything about this subject. Answers cite the exact book pages.',
+      placeholder: 'Ask the subject tutor…'
+    },
+    concepts: {
+      title: 'Key concepts',
+      sub: 'The most important ideas across the filtered books. Tap one to ask the tutor.',
+      empty: 'No concepts yet for this filter.',
+      occurrences: 'occurrences'
+    },
+    mindmap: {
+      title: 'Concept mind map',
+      sub: 'How the subject\'s concepts connect, based on your filters.',
+      generating: 'Building the mind map…',
+      empty: 'No mind map yet for this filter.'
+    },
+    ingest: {
+      title: 'Add a book to this subject',
+      sub: 'Upload your own material and we will index it into this subject.',
+      needFilters: 'Tip: pick a grade, type and language above so the new book is filed correctly.',
+      uploadCta: 'Drop a PDF here or click to choose',
+      defaultType: 'Defaults to your uploads if no type is chosen.'
+    },
+    planner: { title: 'Study planner', sub: 'A planner agent will build and adapt your study schedule for this subject.' },
+    performance: { title: 'Performance', sub: 'A pedagogy agent will track your mastery and surface weak spots.' },
+    assessment: { title: 'Quick questions', sub: 'An assessment agent will generate quizzes and ministerial-style questions.' },
+    explain: { title: 'Deep explainer', sub: 'A deep-explainer agent will break down any topic step by step.' }
   },
   plan: {
     title: 'Your week plan',
@@ -107,6 +157,7 @@ const dict = {
     pages: 'pages',
     publisher: 'Publisher',
     year: 'Year',
+    type: 'Type',
     lastOpened: 'Last opened',
     selected: 'book selected',
     selectedPlural: 'books selected',

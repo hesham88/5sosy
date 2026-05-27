@@ -61,6 +61,7 @@ const dict = {
     last: 'Último tema',
     drill: 'Ejercicio',
     openBooks: 'Abrir libros',
+    openSubject: 'Abrir materia',
     takeQuiz: 'Hacer el quiz',
     allSubjects: 'Todas las materias',
     onlyTrack: 'Solo mi itinerario',
@@ -78,6 +79,55 @@ const dict = {
     allTracks: 'Todos los itinerarios',
     resetFilters: 'Restablecer',
     noMatch: 'Ninguna materia coincide con tu búsqueda.'
+  },
+  subject: {
+    back: 'Todas las materias',
+    books: 'libros',
+    soon: 'Próximamente',
+    search: {
+      placeholder: 'Buscar dentro de esta materia…',
+      btn: 'Buscar',
+      noResults: 'No hay páginas coincidentes en esta materia.'
+    },
+    tabs: {
+      tutor: 'Tutor IA',
+      concepts: 'Conceptos',
+      mindmap: 'Mapa mental',
+      ingest: 'Añadir libro',
+      planner: 'Planificador',
+      performance: 'Rendimiento',
+      assessment: 'Preguntas rápidas',
+      explain: 'Explicador'
+    },
+    tutor: {
+      title: 'Tutor IA de {subject}',
+      sub: 'Basado en tus libros — libro del alumno primero',
+      empty: 'Pregunta lo que sea sobre esta materia. Las respuestas citan las páginas exactas.',
+      placeholder: 'Pregunta al tutor de la materia…'
+    },
+    concepts: {
+      title: 'Conceptos clave',
+      sub: 'Las ideas más importantes de los libros filtrados. Toca uno para preguntar al tutor.',
+      empty: 'Aún no hay conceptos para este filtro.',
+      occurrences: 'apariciones'
+    },
+    mindmap: {
+      title: 'Mapa mental de conceptos',
+      sub: 'Cómo se conectan los conceptos de la materia, según tus filtros.',
+      generating: 'Construyendo el mapa mental…',
+      empty: 'Aún no hay mapa mental para este filtro.'
+    },
+    ingest: {
+      title: 'Añadir un libro a esta materia',
+      sub: 'Sube tu propio material y lo indexaremos en esta materia.',
+      needFilters: 'Consejo: elige grado, tipo e idioma arriba para clasificar bien el libro.',
+      uploadCta: 'Suelta un PDF aquí o haz clic para elegir',
+      defaultType: 'Se clasifica como «tus subidas» si no eliges un tipo.'
+    },
+    planner: { title: 'Planificador de estudio', sub: 'Un agente planificador creará y adaptará tu horario para esta materia.' },
+    performance: { title: 'Rendimiento', sub: 'Un agente pedagógico seguirá tu dominio y mostrará puntos débiles.' },
+    assessment: { title: 'Preguntas rápidas', sub: 'Un agente de evaluación generará cuestionarios y preguntas de estilo ministerial.' },
+    explain: { title: 'Explicador profundo', sub: 'Un agente explicador desglosará cualquier tema paso a paso.' }
   },
   plan: {
     title: 'Tu plan semanal',
@@ -107,6 +157,7 @@ const dict = {
     pages: 'páginas',
     publisher: 'Editorial',
     year: 'Año',
+    type: 'Tipo',
     lastOpened: 'Última apertura',
     selected: 'libro seleccionado',
     selectedPlural: 'libros seleccionados',

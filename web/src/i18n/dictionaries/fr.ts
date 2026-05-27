@@ -61,6 +61,7 @@ const dict = {
     last: 'Dernier sujet',
     drill: 'Exercice',
     openBooks: 'Ouvrir les livres',
+    openSubject: 'Ouvrir la matière',
     takeQuiz: 'Passer le quiz',
     allSubjects: 'Toutes les matières',
     onlyTrack: 'Ma filière seulement',
@@ -78,6 +79,55 @@ const dict = {
     allTracks: 'Toutes les filières',
     resetFilters: 'Réinitialiser',
     noMatch: 'Aucune matière ne correspond à votre recherche.'
+  },
+  subject: {
+    back: 'Toutes les matières',
+    books: 'livres',
+    soon: 'Bientôt disponible',
+    search: {
+      placeholder: 'Rechercher dans cette matière…',
+      btn: 'Rechercher',
+      noResults: 'Aucune page correspondante dans cette matière.'
+    },
+    tabs: {
+      tutor: 'Tuteur IA',
+      concepts: 'Concepts',
+      mindmap: 'Carte mentale',
+      ingest: 'Ajouter un livre',
+      planner: 'Planificateur',
+      performance: 'Performance',
+      assessment: 'Questions rapides',
+      explain: 'Explicateur'
+    },
+    tutor: {
+      title: 'Tuteur IA en {subject}',
+      sub: 'Basé sur vos livres — livre de l\'élève en priorité',
+      empty: 'Posez vos questions sur cette matière. Les réponses citent les pages exactes.',
+      placeholder: 'Demandez au tuteur de la matière…'
+    },
+    concepts: {
+      title: 'Concepts clés',
+      sub: 'Les idées les plus importantes des livres filtrés. Touchez-en un pour interroger le tuteur.',
+      empty: 'Aucun concept pour ce filtre.',
+      occurrences: 'occurrences'
+    },
+    mindmap: {
+      title: 'Carte mentale des concepts',
+      sub: 'Comment les concepts de la matière se relient, selon vos filtres.',
+      generating: 'Construction de la carte mentale…',
+      empty: 'Aucune carte mentale pour ce filtre.'
+    },
+    ingest: {
+      title: 'Ajouter un livre à cette matière',
+      sub: 'Téléversez votre propre contenu et nous l\'indexerons dans cette matière.',
+      needFilters: 'Astuce : choisissez un niveau, un type et une langue ci-dessus pour bien classer le livre.',
+      uploadCta: 'Déposez un PDF ici ou cliquez pour choisir',
+      defaultType: 'Classé comme « vos téléversements » si aucun type n\'est choisi.'
+    },
+    planner: { title: 'Planificateur d\'étude', sub: 'Un agent planificateur créera et adaptera votre planning pour cette matière.' },
+    performance: { title: 'Performance', sub: 'Un agent pédagogique suivra votre maîtrise et révélera vos points faibles.' },
+    assessment: { title: 'Questions rapides', sub: 'Un agent d\'évaluation générera des quiz et des questions de type ministériel.' },
+    explain: { title: 'Explicateur approfondi', sub: 'Un agent explicateur décomposera n\'importe quel sujet étape par étape.' }
   },
   plan: {
     title: 'Votre plan de la semaine',
@@ -107,6 +157,7 @@ const dict = {
     pages: 'pages',
     publisher: 'Éditeur',
     year: 'Année',
+    type: 'Type',
     lastOpened: 'Dernière ouverture',
     selected: 'livre sélectionné',
     selectedPlural: 'livres sélectionnés',

@@ -312,10 +312,24 @@ export default function SubjectsScreen() {
                 books.map(b => b.typeI18n?.[locale] || b.typeI18n?.en || b.type || '')
               )).filter(Boolean);
 
+              // Languages also derive from the (filtered) books so the language
+              // filter cascades into the card, matching grades/types above.
+              const localizedLanguages = Array.from(new Set(
+                books.map(b => b.language || '')
+              )).filter(Boolean);
+
+              const goToSubject = () => router.push(`/${locale}/subjects/${s.slug}`);
+
               return (
                 <Card key={s.slug} className="overflow-hidden card-lift flex flex-col justify-between min-h-[280px]">
                   <div>
-                    <div className={`${h.bg} px-5 pt-5 pb-4 flex items-start gap-4`}>
+                    <div
+                      onClick={goToSubject}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') goToSubject(); }}
+                      className={`${h.bg} px-5 pt-5 pb-4 flex items-start gap-4 cursor-pointer hover:brightness-[0.98] transition`}
+                    >
                       <div className={`w-14 h-14 rounded-2xl ${h.dot} text-white grid place-items-center text-3xl shadow-md shrink-0`}>
                         {s.glyph || meta.glyph}
                       </div>
@@ -338,13 +352,13 @@ export default function SubjectsScreen() {
 
                     {/* Meta details (Languages, Grades, Types) */}
                     <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/20 text-[12px] space-y-2.5">
-                      {s.languages && s.languages.length > 0 && (
+                      {localizedLanguages.length > 0 && (
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide min-w-[75px]">
                             {isAR ? 'اللغات:' : 'Languages:'}
                           </span>
                           <div className="flex gap-1 flex-wrap">
-                            {s.languages.map((lang) => (
+                            {localizedLanguages.map((lang) => (
                               <span key={lang} className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-650 font-bold text-[9.5px] uppercase">
                                 {lang === 'ar' ? (isAR ? 'عربي' : 'AR') : lang === 'en' ? (isAR ? 'إنجليزي' : 'EN') : lang.toUpperCase()}
                               </span>
@@ -442,8 +456,13 @@ export default function SubjectsScreen() {
                   </div>
 
                   <div>
+                    <div className="px-3 pt-3 bg-white">
+                      <Btn kind="primary" size="sm" className="w-full" onClick={goToSubject}>
+                        🎓 {t.subjects.openSubject}
+                      </Btn>
+                    </div>
                     <div className="px-3 py-3 flex items-center gap-2 flex-wrap bg-white">
-                      <Btn kind="primary" size="sm" className="flex-1" onClick={() => router.push(`/${locale}/books?subject=${s.slug}`)}>
+                      <Btn kind="outline" size="sm" className="flex-1" onClick={() => router.push(`/${locale}/books?subject=${s.slug}`)}>
                         📖 {t.subjects.openBooks}
                       </Btn>
                       <Btn kind="outline" size="sm" className="flex-1" onClick={() => router.push(`/${locale}/session?subject=${s.slug}`)}>

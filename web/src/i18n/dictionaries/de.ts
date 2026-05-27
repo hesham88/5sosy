@@ -61,6 +61,7 @@ const dict = {
     last: 'Letztes Thema',
     drill: 'Übung',
     openBooks: 'Bücher öffnen',
+    openSubject: 'Fach öffnen',
     takeQuiz: 'Quiz starten',
     allSubjects: 'Alle Fächer',
     onlyTrack: 'Nur mein Zweig',
@@ -78,6 +79,55 @@ const dict = {
     allTracks: 'Alle Zweige',
     resetFilters: 'Zurücksetzen',
     noMatch: 'Keine Fächer entsprechen Ihrer Suche.'
+  },
+  subject: {
+    back: 'Alle Fächer',
+    books: 'Bücher',
+    soon: 'Demnächst',
+    search: {
+      placeholder: 'In diesem Fach suchen…',
+      btn: 'Suchen',
+      noResults: 'Keine passenden Seiten in diesem Fach.'
+    },
+    tabs: {
+      tutor: 'KI-Tutor',
+      concepts: 'Konzepte',
+      mindmap: 'Mindmap',
+      ingest: 'Buch hinzufügen',
+      planner: 'Planer',
+      performance: 'Leistung',
+      assessment: 'Schnellfragen',
+      explain: 'Tiefen-Erklärer'
+    },
+    tutor: {
+      title: 'KI-Tutor für {subject}',
+      sub: 'Basiert auf deinen Büchern — Schülerbuch zuerst',
+      empty: 'Frag alles über dieses Fach. Antworten zitieren die genauen Buchseiten.',
+      placeholder: 'Frag den Fach-Tutor…'
+    },
+    concepts: {
+      title: 'Schlüsselkonzepte',
+      sub: 'Die wichtigsten Ideen über die gefilterten Bücher. Tippe eines an, um den Tutor zu fragen.',
+      empty: 'Noch keine Konzepte für diesen Filter.',
+      occurrences: 'Vorkommen'
+    },
+    mindmap: {
+      title: 'Konzept-Mindmap',
+      sub: 'Wie die Konzepte des Fachs zusammenhängen, basierend auf deinen Filtern.',
+      generating: 'Mindmap wird erstellt…',
+      empty: 'Noch keine Mindmap für diesen Filter.'
+    },
+    ingest: {
+      title: 'Buch zu diesem Fach hinzufügen',
+      sub: 'Lade dein eigenes Material hoch und wir indexieren es in dieses Fach.',
+      needFilters: 'Tipp: Wähle oben Klasse, Typ und Sprache, damit das neue Buch korrekt einsortiert wird.',
+      uploadCta: 'PDF hier ablegen oder zum Auswählen klicken',
+      defaultType: 'Wird als „deine Uploads“ eingestuft, wenn kein Typ gewählt ist.'
+    },
+    planner: { title: 'Lernplaner', sub: 'Ein Planer-Agent erstellt und passt deinen Lernplan für dieses Fach an.' },
+    performance: { title: 'Leistung', sub: 'Ein Pädagogik-Agent verfolgt deinen Lernstand und zeigt Schwächen auf.' },
+    assessment: { title: 'Schnellfragen', sub: 'Ein Prüfungs-Agent erstellt Quizze und Fragen im Ministeriumsstil.' },
+    explain: { title: 'Tiefen-Erklärer', sub: 'Ein Erklär-Agent zerlegt jedes Thema Schritt für Schritt.' }
   },
   plan: {
     title: 'Dein Wochenplan',
@@ -107,6 +157,7 @@ const dict = {
     pages: 'Seiten',
     publisher: 'Verlag',
     year: 'Jahr',
+    type: 'Typ',
     lastOpened: 'Zuletzt geöffnet',
     selected: 'Buch ausgewählt',
     selectedPlural: 'Bücher ausgewählt',
