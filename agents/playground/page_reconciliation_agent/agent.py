@@ -36,6 +36,26 @@ _STOP = {
     "the", "and", "for", "with", "that", "this", "from", "are", "was", "were",
     "في", "من", "على", "الى", "إلى", "عن", "هذا", "هذه", "التي", "الذي", "كان",
 }
+
+# LaTeX / markup command fragments + structural tokens. After the leading backslash
+# is stripped by the word regex, commands like \frac \vec \text become bare words
+# and pollute keywords/labels — drop them so labels are real content terms.
+_LATEX_STOP = {
+    "text", "frac", "dfrac", "tfrac", "vec", "sqrt", "cdot", "cdots", "times", "div",
+    "left", "right", "begin", "end", "mathrm", "mathbf", "mathcal", "mathit", "mathbb",
+    "displaystyle", "scriptstyle", "quad", "qquad", "overline", "underline", "overrightarrow",
+    "hat", "bar", "dot", "ddot", "tilde", "partial", "nabla", "prime",
+    "sum", "prod", "int", "iint", "oint", "lim", "infty", "ldots", "vdots", "ddots",
+    "alpha", "beta", "gamma", "delta", "theta", "lambda", "sigma", "omega", "phi",
+    "psi", "rho", "tau", "epsilon", "varepsilon", "varphi", "mu", "nu", "pi", "chi", "zeta", "eta", "kappa",
+    "equation", "align", "aligned", "array", "matrix", "pmatrix", "bmatrix", "vmatrix", "cases",
+    "label", "ref", "eqref", "tag", "nonumber", "item", "itemize", "enumerate",
+    "textbf", "textit", "emph", "section", "subsection", "chapter", "caption", "figure", "table",
+    "rightarrow", "leftarrow", "leftrightarrow", "mapsto", "langle", "rangle",
+    "cup", "cap", "subset", "supset", "forall", "exists", "approx", "equiv", "leq", "geq", "neq",
+    "begin", "end", "hline", "cline", "multicolumn", "centering", "includegraphics",
+}
+_STOP = _STOP | _LATEX_STOP
 _WORD = re.compile(r"[A-Za-z؀-ۿ]{3,}")
 
 KEYWORDS_PER_PAGE = int(os.getenv("RECONCILE_KEYWORDS_PER_PAGE", "8"))
