@@ -1516,6 +1516,198 @@ class SubjectSearchRequest(BaseModel):
     language: str | None = None
 
 
+# ── Concept centroid cache ───────────────────────────────────────────────────
+# 2.7k concept_nodes is tiny, so we cache their (normalized) centroids in memory
+# and score the query with one numpy dot-product — sub-ms, no extra Atlas index,
+# no build wait. Refreshed on a TTL; rebuilt automatically after a mind-map run.
+_concept_cache: dict = {"loaded": False, "ts": 0.0, "ids": [], "labels": [], "subjects": [], "mat": None}
+_concept_cache_lock = asyncio.Lock()
+CONCEPT_CACHE_TTL = float(os.getenv("CONCEPT_CACHE_TTL", "600"))
+
+
+async def _ensure_concept_cache(force: bool = False) -> None:
+    import numpy as np
+    async with _concept_cache_lock:
+        now = time.time()
+        if not force and _concept_cache["loaded"] and (now - _concept_cache["ts"] < CONCEPT_CACHE_TTL):
+            return
+        from shared.mongodb_client import get_mongodb_client
+        _, mdb = get_mongodb_client()
+        loop = asyncio.get_running_loop()
+        docs = await loop.run_in_executor(
+            None,
+            lambda: list(mdb["concept_nodes"].find(
+                {"embedding": {"$exists": True, "$ne": []}},
+                {"label": 1, "subject": 1, "embedding": 1},
+            )),
+        )
+        if not docs:
+            _concept_cache.update({"loaded": True, "ts": now, "ids": [], "labels": [], "subjects": [], "mat": None})
+            return
+        mat = np.asarray([d["embedding"] for d in docs], dtype="float32")
+        norms = np.linalg.norm(mat, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        _concept_cache.update({
+            "loaded": True, "ts": now,
+            "ids": [d["_id"] for d in docs],
+            "labels": [d.get("label", "") for d in docs],
+            "subjects": [d.get("subject", "") for d in docs],
+            "mat": mat / norms,
+        })
+        print(f"concept cache: loaded {len(docs)} concept centroids", flush=True)
+
+
+def _intent_weight(book_type_bucket: str, intent: str) -> float:
+    """Core-vs-supporting nudge using the precomputed bookType bucket."""
+    core = (book_type_bucket or "core") == "core"
+    if intent == "foundational":
+        return 1.0 if core else 0.7
+    if intent == "exam_prep":
+        return 0.7 if core else 1.0
+    return 1.0
+
+
+async def _concept_search(query_emb: list[float], req: "SubjectSearchRequest",
+                          cleaned: str, filters: dict, intent: str) -> dict | None:
+    """Concept-powered ranking. Returns a results dict, or None to signal the
+    caller to fall back to the page-based path (no concept graph yet)."""
+    import numpy as np
+    await _ensure_concept_cache()
+    mat = _concept_cache["mat"]
+    if mat is None or not len(_concept_cache["ids"]):
+        return None
+
+    q = np.asarray(query_emb, dtype="float32")
+    qn = np.linalg.norm(q) or 1.0
+    sims = mat @ (q / qn)
+
+    top_idx = np.argsort(-sims)[:40]
+    concept_sim = {
+        _concept_cache["ids"][int(i)]: float(sims[int(i)])
+        for i in top_idx if float(sims[int(i)]) > 0.30
+    }
+    if not concept_sim:
+        return {"results": [], "engine": "concept", "cleanedQuery": cleaned}
+
+    from shared.mongodb_client import get_mongodb_client
+    _, mdb = get_mongodb_client()
+    loop = asyncio.get_running_loop()
+    occ_filter: dict = {"conceptId": {"$in": list(concept_sim.keys())}}
+    grade = req.grade or filters.get("grade")
+    if grade:
+        occ_filter["grade"] = grade
+    occs = await loop.run_in_executor(
+        None,
+        lambda: list(mdb["concept_occurrences"].find(
+            occ_filter,
+            {"conceptId": 1, "subject": 1, "bookId": 1, "grade": 1, "language": 1, "bookType": 1},
+        )),
+    )
+
+    lang = (req.language or filters.get("language") or "").lower()
+    agg: dict[str, dict] = {}
+    for o in occs:
+        if lang and (o.get("language", "").lower() != lang):
+            continue
+        slug = o.get("subject")
+        if not slug:
+            continue
+        sim = concept_sim.get(o["conceptId"], 0.0)
+        w = _intent_weight(o.get("bookType", "core"), intent)
+        a = agg.setdefault(slug, {"slug": slug, "score": 0.0, "hits": 0,
+                                  "bookIds": set(), "grades": set(), "conceptIds": set()})
+        a["score"] += sim * w
+        a["hits"] += 1
+        if o.get("bookId"):
+            a["bookIds"].add(o["bookId"])
+        if o.get("grade"):
+            a["grades"].add(o["grade"])
+        a["conceptIds"].add(o["conceptId"])
+
+    if not agg:
+        return {"results": [], "engine": "concept", "cleanedQuery": cleaned}
+
+    id_to_label = dict(zip(_concept_cache["ids"], _concept_cache["labels"]))
+    smax = max(a["score"] for a in agg.values()) or 1.0
+    results = sorted(
+        (
+            {
+                "slug": a["slug"],
+                "score": round(a["score"] / smax, 4),
+                "hits": a["hits"],
+                "bookIds": sorted(a["bookIds"]),
+                "grades": sorted(a["grades"]),
+                # top matched concept labels (by sim) for richer UI context
+                "concepts": [
+                    id_to_label.get(cid, "")
+                    for cid in sorted(a["conceptIds"], key=lambda c: concept_sim.get(c, 0), reverse=True)[:5]
+                    if id_to_label.get(cid)
+                ],
+            }
+            for a in agg.values()
+        ),
+        key=lambda r: r["score"],
+        reverse=True,
+    )[: req.limit]
+    return {"results": results, "engine": "concept", "cleanedQuery": cleaned}
+
+
+async def _pages_search(query_emb: list[float], req: "SubjectSearchRequest", cleaned: str) -> dict:
+    """Fallback: hybrid retrieval over book_pages grouped to subject (used when the
+    concept graph isn't built yet)."""
+    from shared.mongodb_client import get_mongodb_client
+    _, mongo_db = get_mongodb_client()
+    loop = asyncio.get_running_loop()
+    pipeline = [
+        {"$vectorSearch": {
+            "index": os.getenv("MONGO_VECTOR_INDEX", "vector_index"),
+            "path": "embedding",
+            "queryVector": query_emb,
+            "numCandidates": 400,
+            "limit": 150,
+        }},
+        {"$project": {"_id": 0, "bookId": 1, "subject": 1, "grade": 1, "language": 1,
+                      "score": {"$meta": "vectorSearchScore"}}},
+    ]
+    try:
+        docs = await loop.run_in_executor(
+            None, lambda: list(mongo_db["book_pages"].aggregate(pipeline))
+        )
+    except Exception as e:
+        print(f"subjects_search: vectorSearch failed: {e}")
+        raise HTTPException(status_code=503, detail="search index unavailable")
+
+    grade = req.grade
+    lang = (req.language or "").lower()
+    agg: dict[str, dict] = {}
+    for d in docs:
+        slug = d.get("subject")
+        if not slug:  # post-reconcile pages carry subject; pre-reconcile may not
+            continue
+        if grade and d.get("grade") != grade:
+            continue
+        if lang and (d.get("language") or "").lower() != lang:
+            continue
+        a = agg.setdefault(slug, {"slug": slug, "score": 0.0, "hits": 0, "bookIds": set(), "grades": set()})
+        a["score"] += float(d.get("score", 0))
+        a["hits"] += 1
+        if d.get("bookId"):
+            a["bookIds"].add(d["bookId"])
+        if d.get("grade"):
+            a["grades"].add(d["grade"])
+
+    if not agg:
+        return {"results": [], "engine": "pages", "cleanedQuery": cleaned}
+    smax = max(a["score"] for a in agg.values()) or 1.0
+    results = sorted(
+        ({"slug": a["slug"], "score": round(a["score"] / smax, 4), "hits": a["hits"],
+          "bookIds": sorted(a["bookIds"]), "grades": sorted(a["grades"])}
+         for a in agg.values()),
+        key=lambda r: r["score"], reverse=True,
+    )[: req.limit]
+    return {"results": results, "engine": "pages", "cleanedQuery": cleaned}
+
+
 @app.post("/v1/subjects/search")
 async def subjects_search(
     req: SubjectSearchRequest,
@@ -1525,11 +1717,17 @@ async def subjects_search(
     if os.getenv("DATABASE_PROVIDER", "firestore").lower() != "mongodb":
         raise HTTPException(status_code=400, detail="subject search requires DATABASE_PROVIDER=mongodb")
 
-    _, _, cleaned = _query_terms(req.query)
+    # 1) Deterministic query understanding (no LLM): clean + lift grade/language/
+    # intent cues into structured filters.
+    from subject_search_agent.agent import parse_query_plan
+    plan = parse_query_plan(req.query)
+    cleaned = plan.get("cleaned_query") or ""
+    filters = plan.get("filters", {})
+    intent = plan.get("intent", "neutral")
     if not cleaned:
         return {"results": [], "engine": "empty"}
 
-    # 1) Embed the cleaned query (reuse the page-embedding model so vectors align).
+    # 2) Embed once (same model as concepts + pages, so vectors align).
     try:
         client = genai.Client()
         response = await client.aio.models.embed_content(
@@ -1544,87 +1742,13 @@ async def subjects_search(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"failed to embed query: {e}")
 
-    # 2) One Atlas $vectorSearch over book_pages. NOTE: book_pages docs do NOT carry
-    # subject/grade (those live on the `books` collection), so we can't pre-filter
-    # in-index — retrieve top candidates, then resolve + filter via `books`.
-    from shared.mongodb_client import get_mongodb_client
-    _, mongo_db = get_mongodb_client()
-    loop = asyncio.get_running_loop()
-    pipeline = [
-        {"$vectorSearch": {
-            "index": os.getenv("MONGO_VECTOR_INDEX", "vector_index"),
-            "path": "embedding",
-            "queryVector": query_emb,
-            "numCandidates": 400,
-            "limit": 150,
-        }},
-        {"$project": {"_id": 0, "bookId": 1, "pageNumber": 1, "score": {"$meta": "vectorSearchScore"}}},
-    ]
-    try:
-        docs = await loop.run_in_executor(
-            None, lambda: list(mongo_db["book_pages"].aggregate(pipeline))
-        )
-    except Exception as e:
-        print(f"subjects_search: vectorSearch failed: {e}")
-        raise HTTPException(status_code=503, detail="search index unavailable")
-
-    # 3) Resolve bookId → {subject, grade, type, language} from `books` in one batch.
-    ids = list({d.get("bookId") for d in docs if d.get("bookId")})
-    if not ids:
-        return {"results": [], "engine": "vectorSearch", "cleanedQuery": cleaned}
-    books = await loop.run_in_executor(
-        None,
-        lambda: list(mongo_db["books"].find(
-            {"_id": {"$in": ids}},
-            {"subject": 1, "grade": 1, "type": 1, "language": 1},
-        )),
-    )
-    bmeta = {b.get("_id"): b for b in books}
-
-    # 4) Apply grade/language post-filters (from the resolved book) and group to subject.
-    grade = req.grade
-    lang = (req.language or "").lower()
-    agg: dict[str, dict] = {}
-    for d in docs:
-        b = bmeta.get(d.get("bookId"))
-        if not b:
-            continue
-        slug = b.get("subject")
-        if not slug:
-            continue
-        if grade and b.get("grade") != grade:
-            continue
-        if lang and (b.get("language") or "").lower() != lang:
-            continue
-        score = float(d.get("score", 0))
-        a = agg.setdefault(slug, {"slug": slug, "score": 0.0, "hits": 0, "bookIds": set(), "grades": set()})
-        a["score"] += score
-        a["hits"] += 1
-        a["bookIds"].add(d["bookId"])
-        if b.get("grade"):
-            a["grades"].add(b["grade"])
-
-    if not agg:
-        return {"results": [], "engine": "vectorSearch", "cleanedQuery": cleaned}
-
-    # 4) Normalize subject scores to 0..1 and rank.
-    smax = max(a["score"] for a in agg.values()) or 1.0
-    results = sorted(
-        (
-            {
-                "slug": a["slug"],
-                "score": round(a["score"] / smax, 4),
-                "hits": a["hits"],
-                "bookIds": sorted(a["bookIds"]),
-                "grades": sorted(a["grades"]),
-            }
-            for a in agg.values()
-        ),
-        key=lambda r: r["score"],
-        reverse=True,
-    )[: req.limit]
-
-    return {"results": results, "engine": "vectorSearch", "cleanedQuery": cleaned}
+    # 3) Concept-powered ranking; fall back to page grouping if no graph yet.
+    result = await _concept_search(query_emb, req, cleaned, filters, intent)
+    if result is None:
+        result = await _pages_search(query_emb, req, cleaned)
+    result["intent"] = intent
+    result["filters"] = filters
+    return result
 
 
 # In-memory cache for page embeddings
