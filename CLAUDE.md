@@ -9,8 +9,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Two deployable units live in this repo, with very different runtime models:
 
 - **`web/`** — Next.js 15 App Router app on Firebase **App Hosting** (`khsosyapphosting` backend in `us-east4`, auto-deploys from `main`). Live at https://khsosyapphosting--khsosy.us-east4.hosted.app. Firebase project: `khsosy`.
-- **`agents/playground/`** — `fivesosybot` ADK service on **Cloud Run** (`us-east4`, project `khsosy`). Live at https://fivesosybot-ujeiecpdja-uk.a.run.app. **Not** in the App Hosting deploy graph — deploy it explicitly with `agents/playground/deploy.ps1`.
-- **`agents/src/fivesosy_agents/`** — scaffold for the 5-agent production stack (orchestrator / ingestion / pedagogy / assessment / av). All handlers currently return well-shaped placeholder payloads; HTTP contract is stable so the web app already consumes it via simulated fallback.
+- **`agents/playground/`** — `khsosybot` ADK service on **Cloud Run** (`us-east4`, project `khsosy`). Live at https://khsosybot-ujeiecpdja-uk.a.run.app. **Not** in the App Hosting deploy graph — deploy it explicitly with `agents/playground/deploy.ps1`.
+- **Legacy 5-agent scaffold** — previously in `agents/src/fivesosy_agents/`, now deprecated and deleted. The web app uses simulated fallback mode for this surface.
 
 `khsosy.web.app` is a Firebase *Hosting* default — it is a different product and cannot be added as an App Hosting custom domain.
 
@@ -32,17 +32,11 @@ Agent playground commands run from `agents/playground/`:
 .\.venv\Scripts\Activate.ps1
 adk web                          # http://localhost:8000 — pick orchestrator_agent for the full flow
 $env:PORT=8081; python server.py # FastAPI SSE server locally
-.\deploy.ps1                     # Re-deploys fivesosybot to Cloud Run
+.\deploy.ps1                     # Re-deploys khsosybot to Cloud Run
 .\setup-secrets.ps1 -Force -AgentsKey <new>   # Rotate API key in Secret Manager
 ```
 
-Legacy 5-agent scaffold (`agents/`):
 
-```powershell
-pip install -e .[dev]
-uvicorn fivesosy_agents.server:app --reload --port 8080
-pytest -q
-```
 
 Validate before pushing to `main` — App Hosting auto-deploys on push, so a bad commit ships straight to production:
 
@@ -51,7 +45,7 @@ npm --prefix web run typecheck
 npm --prefix web run build
 ```
 
-If a fix involves Cloud Run, **also redeploy `fivesosybot` and smoke-test `/health` + `/v1/chat`** before pushing. App Hosting deploys do not touch Cloud Run.
+If a fix involves Cloud Run, **also redeploy `khsosybot` and smoke-test `/health` + `/v1/chat`** before pushing. App Hosting deploys do not touch Cloud Run.
 
 ## Architecture
 
@@ -59,9 +53,9 @@ If a fix involves Cloud Run, **also redeploy `fivesosybot` and smoke-test `/heal
 
 Two parallel proxy layers, with different upstreams and different fallback behavior:
 
-1. **Floating chatbot (`5sosybot`)**: `web/src/components/fivesosybot/FiveSosyBot.tsx` is mounted in `web/src/app/[locale]/layout.tsx` so it appears on every locale route. It POSTs to `web/src/app/api/agents/chat/route.ts`, which reads `AGENTS_BASE_URL` + `AGENTS_API_KEY` from env, injects `X-API-Key`, and streams SSE from the Cloud Run `fivesosybot` service through to the browser. Falls back to a simulated SSE answer if either env var is missing.
+1. **Floating chatbot (`5sosybot`)**: `web/src/components/fivesosybot/FiveSosyBot.tsx` is mounted in `web/src/app/[locale]/layout.tsx` so it appears on every locale route. It POSTs to `web/src/app/api/agents/chat/route.ts`, which reads `AGENTS_BASE_URL` + `AGENTS_API_KEY` from env, injects `X-API-Key`, and streams SSE from the Cloud Run `khsosybot` service through to the browser. Falls back to a simulated SSE answer if either env var is missing.
 
-2. **Legacy 5-agent surface**: client calls `callAgent(name, payload)` from `web/src/lib/agents.ts` → `/api/agents/<name>` (handled by `web/src/app/api/agents/_lib.ts`) → reads `NEXT_PUBLIC_AGENTS_BASE_URL` + `AGENTS_SERVICE_TOKEN` to proxy to the FastAPI service in `agents/src/fivesosy_agents/`. Returns simulated payloads when `NEXT_PUBLIC_AGENTS_BASE_URL` is unset (the current production state). Do not unify the two surfaces — they exist on purpose.
+2. **Legacy 5-agent surface**: client calls `callAgent(name, payload)` from `web/src/lib/agents.ts` → `/api/agents/<name>` (handled by `web/src/app/api/agents/_lib.ts`). The original FastAPI backend is deprecated and deleted; it now operates purely in simulated fallback mode. Do not unify the two surfaces — they exist on purpose.
 
 The SSE shape from `agents/playground/server.py /v1/chat` is `start` → many `step` (each with `agent`, `step_type`, `input/output`, `duration_ms`, optional `grounding`) → terminal `final` (with `intent`, `final_response`, `trace[]`, timings). See `_extract_step` for the mapping from ADK runtime events.
 
@@ -71,7 +65,7 @@ Two-agent in-process design — single Cloud Run service, both agents share one 
 
 - `orchestrator_agent` — classifies intent (`ask_time` / `ask_weather` / `chit_chat` / `unknown`), delegates time/weather to executor via `sub_agents=[executor]`, replies directly for chit-chat. Always responds in the user's locale (en / ar).
 - `executor_agent` — typed skills `get_current_time(city, country)` and `get_weather_celsius(city, country)`. Each skill internally runs the `shared/search.py grounded_search` sub-agent because **ADK requires `google_search` to be the only tool on its host agent** — that's why grounded_search is a separate solo-tool sub-agent invoked from inside the typed skill functions.
-- ADK app names must start with a letter (Pydantic-validated): use `fivesosybot_search`, not `5sosybot_search`.
+- ADK app names must start with a letter (Pydantic-validated): use `khsosybot_search`, not `5sosybot_search`.
 - Use `from google.adk.agents.llm_agent import Agent` (not `LlmAgent`); tool functions return structured `dict` with a `status` key, not raw strings.
 - Model is controlled by `GEMINI_MODEL` env var (default `gemini-3.1-flash-lite`).
 

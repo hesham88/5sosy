@@ -4,7 +4,7 @@
 
 This repo has two deployable areas. `web/` is the Next.js 15 App Router application with TypeScript, Tailwind, Firebase Auth, Firestore, and Storage. App routes live in `web/src/app`, reusable UI in `web/src/components`, shared Firebase/client helpers in `web/src/lib`, dictionaries in `web/src/i18n`, and static assets in `web/public`.
 
-`agents/` contains the legacy five-agent FastAPI scaffold in `agents/src/fivesosy_agents` with tests in `agents/tests`. `agents/playground/` contains the active Cloud Run 5sosybot/onboarding/ingestion service and ADK agents.
+`agents/playground/` contains the active Cloud Run 5sosybot/onboarding/ingestion service and ADK agents. The legacy five-agent FastAPI scaffold has been fully deprecated and removed.
 
 ## Build, Test, and Development Commands
 
@@ -13,7 +13,6 @@ This repo has two deployable areas. `web/` is the Next.js 15 App Router applicat
 - `npm --prefix web run typecheck`: TypeScript validation.
 - `npm --prefix web run lint`: Next/ESLint checks.
 - `npm --prefix web run seed`: seed Firestore; requires Google application-default credentials.
-- `cd agents && pip install -e .[dev] && pytest -q`: install and test the legacy agent service.
 - `cd agents/playground && pip install -e .[dev]`: install the active ADK playground service.
 - `cd agents/playground && $env:PORT=8081; python server.py`: run the local FastAPI/SSE service.
 
@@ -25,7 +24,7 @@ Python targets 3.11+, uses type hints, Pydantic models for request/response cont
 
 ## Testing Guidelines
 
-Web validation is primarily `typecheck`, `lint`, and `build`. Python tests use `pytest`; add tests under `agents/tests` using `test_*.py`. For changes touching App Hosting or Cloud Run integration, smoke-test the relevant local endpoint, such as `/health`, `/v1/chat`, or the Next.js `/api/agents/*` proxy.
+Web validation is primarily `typecheck`, `lint`, and `build`. For changes touching App Hosting or Cloud Run integration, smoke-test the relevant local endpoint, such as `/health`, `/v1/chat`, or the Next.js `/api/agents/*` proxy.
 
 ## Commit & Pull Request Guidelines
 

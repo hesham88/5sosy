@@ -47,13 +47,7 @@ where 81% of Egyptian secondary students currently rely on private tutors.
 │   │   ├── ingestion_agent/      # OCRs MOE PDFs and embeds chunks
 │   │   ├── migration_agent/      # Firestore <-> MongoDB sync jobs
 │   │   └── ...                   # harvester, analyzer, pdf_parser, etc.
-│   ├── pyproject.toml
-│   ├── Dockerfile      cloudbuild.yaml
-│   └── src/fivesosy_agents/      # Legacy prototype implementation
-│       ├── server.py             # FastAPI entry; /agents/<name> endpoints
-│       ├── orchestrator.py  ingestion.py  pedagogy.py  assessment.py  av.py
-│       ├── schemas.py            # Pydantic request/response contracts
-│       └── settings.py
+│   └── README.md
 │
 ├── 5sosy_Prototype.html          # Standalone clickable prototype (React via CDN)
 ├── claude_prototype/             # Source for the standalone prototype (HTML + JSX)
@@ -127,26 +121,25 @@ with `mastery/`, `quizAttempts/`, `activity/`, and `studyPlans/today`.
 
 You can then visit e.g. `/ar/u/youssef` to see the parallel-routes profile.
 
-### 4) Agents service (`agents/`)
+### 4) Agents service (`agents/playground/`)
 
 ```powershell
-cd agents
+cd agents/playground
 python -m venv .venv
-.venv\Scripts\activate
+.venv\Scripts\Activate.ps1
 pip install -e .[dev]
-copy .env.example .env
-uvicorn fivesosy_agents.server:app --reload --port 8080
+copy .env.example .env            # then edit and paste your GOOGLE_API_KEY / MONGODB_URI
+$env:PORT=8081; python server.py  # starts the local FastAPI SSE server at http://localhost:8081
 ```
 
 Then in `web/.env.local`:
 
 ```
-NEXT_PUBLIC_AGENTS_BASE_URL=http://localhost:8080
+AGENTS_BASE_URL=http://localhost:8081
+AGENTS_API_KEY=local_bypass
 ```
 
-Until that env var is set, the Next.js `/api/agents/*` routes return
-well-shaped **simulated** payloads — so the UI works end-to-end without the
-agent backend.
+Until these env vars are set, the Next.js chat route returns well-shaped **simulated** payloads.
 
 ### 5) Deploy
 

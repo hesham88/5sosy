@@ -26,7 +26,7 @@
 ### Agent Service (`agents/`)
 - **Development:**
   - Active development uses the modular swarm in: `agents/playground/` (contains `ask_me_agent`, `ingestion_agent`, `migration_agent`, etc.).
-  - Legacy 5-agent code remains in `agents/src/fivesosy_agents/` but is mostly superseded.
+  - Legacy 5-agent code has been deprecated and deleted; the web app falls back to simulated payloads for this surface.
   - Use `.venv` for local execution.
   - Deployment uses dedicated PowerShell scripts (e.g., `deploy.ps1`, `deploy-analyzer.ps1`).
 - **API Surface:**
@@ -47,10 +47,10 @@
 - Python ADK project scaffolded, heavily leveraging a swarm of Gemini 3.1 Flash-Lite agents.
 - Hybrid MongoDB/Firestore database setup, complete with a continuous syncing `migration_agent`.
 - Local execution proxies and robust deployment scripts.
+- Completed full cutover from legacy agent service, removing all legacy files.
+- Added official Apache-2.0 copyright and license text to `LICENSE`.
 
 **Missing / Planned for the Future:**
-- **Full Cutover from Legacy:** Formally deprecate `agents/src/fivesosy_agents/` to ensure all execution goes exclusively through the `agents/playground/` modular swarm.
 - **Repository Finalization:** Push local repository up to `hesham88/5sosy` on GitHub.
 - **App Hosting Link:** Manually connect the newly pushed GitHub repo to Firebase App Hosting to finalize the CI/CD pipeline.
-- **License Integration:** Add the official `Apache-2.0` text into the `LICENSE` file.
 - **Expanded Ingestion:** Move beyond the placeholder/seed MOE textbook data to a full-scale ingestion of actual production Thanaweya Amma PDFs and YouTube video mappings.

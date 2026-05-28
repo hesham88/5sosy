@@ -19,7 +19,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).parent.resolve()
+ROOT = Path(__file__).parent.parent.resolve()
 WEB = ROOT / "web"
 AGENTS = ROOT / "agents"
 PROJECT = "khsosy"
@@ -162,30 +162,31 @@ def step_7_app_hosting() -> None:
 
 def step_8_agents() -> None:
     banner("Step 8: Agents service (Python ADK)")
-    if not AGENTS.exists():
-        err(f"agents directory not found at {AGENTS}")
+    playground = AGENTS / "playground"
+    if not playground.exists():
+        err(f"agents playground directory not found at {playground}")
         return
-    venv = AGENTS / ".venv"
+    venv = playground / ".venv"
     pip = venv / "Scripts" / "pip.exe"
     python_exe = venv / "Scripts" / "python.exe"
 
     if not venv.exists():
-        info("Creating venv at agents/.venv")
-        run(f'"{sys.executable}" -m venv .venv', cwd=AGENTS)
+        info("Creating venv at agents/playground/.venv")
+        run(f'"{sys.executable}" -m venv .venv', cwd=playground)
 
-    info("Installing agents package (editable, with dev extras)")
-    run(f'"{pip}" install -e ".[dev]"', cwd=AGENTS)
+    info("Installing playground agents package (editable, with dev extras)")
+    run(f'"{pip}" install -e ".[dev]"', cwd=playground)
 
-    env_file = AGENTS / ".env"
-    example = AGENTS / ".env.example"
+    env_file = playground / ".env"
+    example = playground / ".env.example"
     if not env_file.exists() and example.exists():
         shutil.copy(example, env_file)
-        ok("Copied .env.example -> .env (edit it before running)")
+        ok("Copied .env.example -> .env in agents/playground (edit it before running)")
 
     print("\nLocal run command (paste in a new terminal):")
-    print(f'  cd "{AGENTS}"')
+    print(f'  cd "{playground}"')
     print(r"  .venv\Scripts\activate")
-    print("  uvicorn fivesosy_agents.server:app --reload --port 8080")
+    print("  $env:PORT=8081; python server.py")
 
     if not have("gcloud"):
         print()
@@ -193,10 +194,10 @@ def step_8_agents() -> None:
         print("Install Google Cloud SDK to deploy: https://cloud.google.com/sdk/docs/install")
         return
 
-    if confirm("Deploy agents to Cloud Run now (gcloud builds submit)?"):
-        run(f"gcloud builds submit --config=cloudbuild.yaml --project={PROJECT}", cwd=AGENTS)
+    if confirm("Deploy agents to Cloud Run now using deploy.ps1?"):
+        run("powershell.exe -ExecutionPolicy Bypass -File deploy.ps1", cwd=playground)
         print()
-        print("Once deployed, set NEXT_PUBLIC_AGENTS_BASE_URL in App Hosting env vars to the")
+        print("Once deployed, set AGENTS_BASE_URL in App Hosting env vars to the")
         print("Cloud Run URL, then redeploy the web app.")
 
 

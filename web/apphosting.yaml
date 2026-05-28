@@ -42,9 +42,6 @@ env:
     secret: mongodb-uri
     availability: [RUNTIME]
 
-  - variable: MAPS_API_KEY
-    secret: maps-api-key
-    availability: [RUNTIME]
 
   - variable: DATABASE_PROVIDER
     value: mongodb

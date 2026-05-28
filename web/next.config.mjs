@@ -6,7 +6,8 @@ const nextConfig = {
       { protocol: 'https', hostname: 'firebasestorage.googleapis.com' },
       { protocol: 'https', hostname: 'lh3.googleusercontent.com' }
     ]
-  }
+  },
+  outputFileTracingRoot: new URL('.', import.meta.url).pathname
 };
 
 export default nextConfig;
