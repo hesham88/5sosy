@@ -5,7 +5,7 @@ const dict = {
   appSub: 'Tu tutor con IA',
   nav: {
     home: 'Inicio', subjects: 'Materias', books: 'Libros', plan: 'Plan',
-    practice: 'Practicar', oral: 'Oral', progress: 'Progreso', settings: 'Ajustes',
+    practice: 'Practicar', oral: 'Oral', progress: 'Progreso', community: 'Community', admin: 'Admin', settings: 'Ajustes',
     profile: 'Perfil', signOut: 'Cerrar sesión', menu: 'Menú', close: 'Cerrar'
   },
   cta: { start: 'Empezar', next: 'Siguiente', back: 'Atrás', save: 'Guardar', finish: 'Finalizar', skip: 'Omitir', signIn: 'Iniciar sesión', signUp: 'Registrarse' },

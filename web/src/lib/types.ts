@@ -1,3 +1,5 @@
+import type { UserRole } from './roles';
+
 export type Locale = 'ar' | 'en';
 
 export type SubjectId = string;
@@ -126,6 +128,88 @@ export type Curriculum = 'thanaweya' | 'IB' | 'AP' | 'GCSE' | 'other';
 export type AvatarStyle =
   | 'adventurer' | 'lorelei' | 'notionists' | 'bottts' | 'fun-emoji' | 'thumbs';
 
+export type Visibility = 'private' | 'connections' | 'public';
+
+export type UserBadge = {
+  id: string;
+  label: string;
+  earnedAt?: unknown;
+};
+
+export type UserSettings = {
+  account?: {
+    emailNotifications?: boolean;
+    loginAlerts?: boolean;
+  };
+  preferences?: {
+    interfaceDensity?: 'compact' | 'comfortable' | 'spacious';
+    preferredLanguage?: string;
+    ttsAccent?: 'eg' | 'msa';
+    dailyReminder?: boolean;
+    weeklyReport?: boolean;
+    weakConceptAlerts?: boolean;
+    examCountdown?: boolean;
+  };
+  privacy?: {
+    profileVisibility?: Visibility;
+    activityVisibility?: Visibility;
+    showBadges?: boolean;
+    saveChatHistory?: boolean;
+    allowAnonymousProductAnalytics?: boolean;
+  };
+};
+
+export type ParentConsentState = {
+  status: 'not_required' | 'pending' | 'approved' | 'rejected';
+  parentEmail?: string;
+  parentUid?: string;
+  requestedAt?: unknown;
+  approvedAt?: unknown;
+};
+
+export type RelationshipSummary = {
+  parents?: string[];
+  children?: string[];
+  teachers?: string[];
+  students?: string[];
+  schools?: string[];
+  friends?: string[];
+};
+
+export type ActivityLogEntry = {
+  id?: string;
+  type: string;
+  title: string;
+  actorUid: string;
+  occurredAt?: unknown;
+  occurredAtIso?: string;
+  resourceType?: string;
+  resourceId?: string;
+  visibility?: Visibility;
+  metadata?: Record<string, unknown>;
+};
+
+export type SchoolProfile = {
+  id: string;
+  slug: string;
+  name: string;
+  type: 'public' | 'private' | 'international' | 'other';
+  country: string;
+  city?: string;
+  description?: string;
+  websiteUrl?: string;
+  externalLinks?: Array<{ label: string; url: string }>;
+  map?: {
+    provider: 'google';
+    placeQuery?: string;
+    lat?: number;
+    lng?: number;
+  };
+  adminUid: string;
+  teacherUids?: string[];
+  studentUids?: string[];
+};
+
 export type CustomBook = {
   id: string;
   name: string;
@@ -141,6 +225,15 @@ export type UserDoc = {
   photoURL: string | null;
   isAnonymous: boolean;
   username: string;
+  role?: UserRole;
+  title?: string;
+  description?: string;
+  coverURL?: string;
+  badges?: UserBadge[];
+  settings?: UserSettings;
+  parentConsent?: ParentConsentState;
+  relationships?: RelationshipSummary;
+  schoolId?: string;
   locale: Locale;
   grade: Grade;
   track: Track;

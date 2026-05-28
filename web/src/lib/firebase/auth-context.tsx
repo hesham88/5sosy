@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from 'react';
 import {
+  deleteUser,
   GoogleAuthProvider,
   onAuthStateChanged,
   signInAnonymously as fbSignInAnonymously,
@@ -11,6 +12,9 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { getFirebase } from './client';
+import { recordActivity } from '@/lib/activity';
+import { identifyAnalyticsUser, trackEvent } from './analytics';
+import { buildBaseUserProfile } from '@/lib/profile';
 
 type AuthState = {
   user: User | null;
@@ -37,7 +41,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return onAuthStateChanged(auth, async (u) => {
       setUser(u);
       setLoading(false);
-      if (u) await upsertUserDoc(u);
+      if (u?.isAnonymous) {
+        await identifyAnalyticsUser(null, { auth_provider: 'guest' });
+        await trackEvent('guest_login');
+        return;
+      }
+      if (u) {
+        await upsertUserDoc(u);
+        await identifyAnalyticsUser(u.uid, { auth_provider: 'firebase' });
+        await recordActivity(u, {
+          type: 'login',
+          title: 'Signed in',
+          resourceType: 'auth',
+          visibility: 'private'
+        });
+      }
     });
   }, []);
 
@@ -54,6 +72,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     const { auth } = getFirebase();
+    const current = auth.currentUser;
+    if (current && !current.isAnonymous) {
+      await recordActivity(current, {
+        type: 'logout',
+        title: 'Signed out',
+        resourceType: 'auth',
+        visibility: 'private'
+      });
+    }
+    if (current?.isAnonymous) {
+      clearGuestState();
+      try {
+        await deleteUser(current);
+        return;
+      } catch {
+        // Fall through to signOut if the anonymous account cannot be deleted.
+      }
+    }
     await fbSignOut(auth);
   };
 
@@ -64,9 +100,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+function clearGuestState() {
+  if (typeof window === 'undefined') return;
+  for (const key of Object.keys(window.localStorage)) {
+    if (key.startsWith('5sosy.guest.') || key.startsWith('5sosy.temp.')) {
+      window.localStorage.removeItem(key);
+    }
+  }
+}
+
 async function upsertUserDoc(u: User) {
   try {
+    if (u.isAnonymous) return;
     const provider = (process.env.NEXT_PUBLIC_DATABASE_PROVIDER || 'firestore').toLowerCase();
+    const baseProfile = buildBaseUserProfile({
+      uid: u.uid,
+      displayName: u.displayName,
+      email: u.email,
+      photoURL: u.photoURL,
+      isAnonymous: u.isAnonymous
+    });
 
     if (provider === 'mongodb') {
       const token = await u.getIdToken();
@@ -77,20 +130,8 @@ async function upsertUserDoc(u: User) {
       });
 
       if (res.status === 404) {
-        const baseProfile = {
-          uid: u.uid,
-          displayName: u.displayName ?? (u.isAnonymous ? 'Guest' : ''),
-          email: u.email ?? null,
-          photoURL: u.photoURL ?? null,
-          isAnonymous: u.isAnonymous,
-          username: (u.email?.split('@')[0] ?? `student-${u.uid.slice(0, 6)}`).toLowerCase(),
-          locale: 'ar',
-          grade: 'g3',
-          track: 'sci_sci',
-          subjects: ['physics', 'chemistry', 'math'],
-          streak: 0,
-          xp: 0,
-          onboardingCompleted: false,
+        const writeProfile = {
+          ...baseProfile,
           createdAt: new Date().toISOString(),
           lastSeenAt: new Date().toISOString(),
           lastLoginAt: new Date().toISOString()
@@ -102,7 +143,7 @@ async function upsertUserDoc(u: User) {
             'Authorization': `Bearer ${token}`,
             'content-type': 'application/json'
           },
-          body: JSON.stringify(baseProfile)
+          body: JSON.stringify(writeProfile)
         });
       } else if (res.ok) {
         await fetch('/api/users/profile', {
@@ -123,19 +164,7 @@ async function upsertUserDoc(u: User) {
       const snap = await getDoc(ref);
       if (!snap.exists()) {
         await setDoc(ref, {
-          uid: u.uid,
-          displayName: u.displayName ?? (u.isAnonymous ? 'Guest' : ''),
-          email: u.email ?? null,
-          photoURL: u.photoURL ?? null,
-          isAnonymous: u.isAnonymous,
-          username: (u.email?.split('@')[0] ?? `student-${u.uid.slice(0, 6)}`).toLowerCase(),
-          locale: 'ar',
-          grade: 'g3',
-          track: 'sci_sci',
-          subjects: ['physics', 'chemistry', 'math'],
-          streak: 0,
-          xp: 0,
-          onboardingCompleted: false,
+          ...baseProfile,
           createdAt: serverTimestamp(),
           lastSeenAt: serverTimestamp(),
           lastLoginAt: serverTimestamp()

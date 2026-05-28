@@ -3,7 +3,7 @@ const dict = {
   appSub: 'خصوصيك الذكي',
   nav: {
     home: 'الرئيسية', subjects: 'المواد', books: 'كتبي', plan: 'خطة اليوم',
-    practice: 'تمرين', oral: 'شفهي', progress: 'تقدمك', settings: 'الإعدادات',
+    practice: 'تمرين', oral: 'شفهي', progress: 'تقدمك', community: 'المجتمع', admin: 'الإدارة', settings: 'الإعدادات',
     profile: 'الملف الشخصي', signOut: 'تسجيل خروج', menu: 'القائمة', close: 'إغلاق'
   },
   cta: { start: 'ابدأ الآن', next: 'التالي', back: 'رجوع', save: 'حفظ', finish: 'إنهاء', skip: 'تخطّي', signIn: 'تسجيل دخول', signUp: 'إنشاء حساب' },

@@ -21,11 +21,15 @@ const NAV_ITEMS = [
   { id: 'oral',     icon: '🎤' },
   { id: 'progress', icon: '📈' },
   { id: 'settings', icon: '⚙️' }
+,
+  { id: 'community', icon: 'C' },
+  { id: 'admin', icon: 'A' }
 ] as const;
 
 const NAV_TO_PATH: Record<string, string> = {
   home: 'home', subjects: 'subjects', books: 'books', plan: 'plan',
-  practice: 'quiz', oral: 'oral', progress: 'progress', settings: 'settings'
+  practice: 'quiz', oral: 'oral', progress: 'progress',
+  community: 'community', admin: 'admin', settings: 'settings'
 };
 
 function activeKeyFor(pathname: string): string {
@@ -99,7 +103,7 @@ function UserFooter({ onPick }: { onPick?: () => void }) {
   // Link to the user's OWN profile page (works for Google + anonymous and under
   // mongodb). The public /u/[username] route does a Firestore username lookup
   // that is empty in mongodb mode → 404, which is what guests were hitting.
-  const profileHref = user ? `/${locale}/profile` : `/${locale}/sign-in`;
+  const profileHref = user && !user.isAnonymous ? `/${locale}/profile` : `/${locale}/sign-in`;
 
   return (
     <div className="border-t border-slate-200 px-4 py-3 flex items-center gap-3">

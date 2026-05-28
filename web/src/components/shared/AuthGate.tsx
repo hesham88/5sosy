@@ -14,7 +14,7 @@ const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const SIGN_IN_SEGMENT = 'sign-in';
 const ONBOARDING_SEGMENT = 'onboarding';
 // Fully public segments (no auth needed): landing (''), sign-in, and legal pages.
-const PUBLIC_SEGMENTS = new Set(['', SIGN_IN_SEGMENT, 'terms', 'privacy']);
+const PUBLIC_SEGMENTS = new Set(['', SIGN_IN_SEGMENT, 'terms', 'privacy', 'parent-consent']);
 
 function lastLoginMillis(profile: { lastLoginAt?: unknown } | null): number | null {
   const v = profile?.lastLoginAt as
@@ -46,6 +46,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       router.replace(`/${locale}/sign-in?next=${next}`);
       return;
     }
+
+    if (user.isAnonymous) return;
 
     if (profileLoading) return;
 
@@ -81,7 +83,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (isPublic) return <>{children}</>;
 
-  if (authLoading || (user && profileLoading)) {
+  if (authLoading || (user && !user.isAnonymous && profileLoading)) {
     return (
       <div className="min-h-screen grid place-items-center bg-slate-50">
         <div className="text-slate-500 text-sm">…</div>
@@ -90,6 +92,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }
 
   if (!user) return null;
+  if (user.isAnonymous) return <>{children}</>;
 
   const lastLogin = lastLoginMillis(profile);
   if (lastLogin && Date.now() - lastLogin > SESSION_MAX_AGE_MS) return null;

@@ -5,7 +5,7 @@ const dict = {
   appSub: 'Dein KI-Nachhilfelehrer',
   nav: {
     home: 'Start', subjects: 'Fächer', books: 'Bücher', plan: 'Plan',
-    practice: 'Üben', oral: 'Mündlich', progress: 'Fortschritt', settings: 'Einstellungen',
+    practice: 'Üben', oral: 'Mündlich', progress: 'Fortschritt', community: 'Community', admin: 'Admin', settings: 'Einstellungen',
     profile: 'Profil', signOut: 'Abmelden', menu: 'Menü', close: 'Schließen'
   },
   cta: { start: 'Loslegen', next: 'Weiter', back: 'Zurück', save: 'Speichern', finish: 'Fertig', skip: 'Überspringen', signIn: 'Anmelden', signUp: 'Registrieren' },

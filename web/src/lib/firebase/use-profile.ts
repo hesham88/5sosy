@@ -29,6 +29,12 @@ export function useProfile(): ProfileState {
       setLoading(false);
       return;
     }
+    if (user.isAnonymous) {
+      setProfile(null);
+      setError(false);
+      setLoading(false);
+      return;
+    }
 
     const provider = (process.env.NEXT_PUBLIC_DATABASE_PROVIDER || 'firestore').toLowerCase();
 

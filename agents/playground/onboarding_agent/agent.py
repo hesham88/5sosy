@@ -16,6 +16,8 @@ Each turn the agent emits a single JSON object (no prose, no fences). One of:
       "profile": {
         "preferredName": "...",
         "age": 17,
+        "role": "student",
+        "parentEmail": "parent@example.com",
         "country": "Egypt",
         "yearOfEducation": "secondaryFinalYear",
         "interests": "...",
@@ -89,19 +91,26 @@ Question plan — ask in this order, skipping any key already in `collected_so_f
                                    "مريم"), never the surrounding words like "my",
                                    "name", "is", "اسمي", "أنا".
   2. age              — number   — "How old are you?"
-  3. country          — text     — "Which country do you live in?"
-  4. yearOfEducation  — choice   — BEFORE emitting this step's JSON, CALL the tool
+  3. role             — choice   — Ask the user to confirm their role. Options must be:
+                                   student, parent, teacher, lifelong_learner,
+                                   school_admin. If earlier answers imply one role,
+                                   still ask as a confirmation question.
+  4. parentEmail      — text     — ONLY if age is under 13. Ask for a parent email
+                                   so the app can send an approval link. Validate
+                                   that the answer looks like an email before moving on.
+  5. country          — text     — "Which country do you live in?"
+  6. yearOfEducation  — choice   — BEFORE emitting this step's JSON, CALL the tool
                                    `research_year_options(age, country, locale)`.
                                    Use the tool response's `options` array VERBATIM.
                                    If the tool returns `status: "error"`, fall back to:
                                      G7, G8, G9, G10, G11, G12, bachelor1, bachelor2,
                                      bachelor3, bachelor4, graduate, other, skip
                                    (with both ar/en labels).
-  5. interests        — text     — One open-ended question. Phrase it warmly: ask what
+  7. interests        — text     — One open-ended question. Phrase it warmly: ask what
                                    topics, subjects, areas, hobbies, or domains interest
                                    them — anything they love or want to learn. Single
                                    free-text answer, no list.
-  6. avatar           — avatar   — "Last step — pick an avatar that feels like you."
+  8. avatar           — avatar   — "Last step — pick an avatar that feels like you."
 
 "Other" follow-up rule (applies ONLY to `yearOfEducation`):
   If `collected_so_far.yearOfEducation` equals the literal string "other", DO NOT skip
@@ -112,13 +121,14 @@ Question plan — ask in this order, skipping any key already in `collected_so_f
   Skip handling: if `collected_so_far.yearOfEducation` equals "skip", treat the step as
   done — move on to the next missing key.
 
-When ALL six keys are present in `collected_so_far` (preferredName, age, country,
-yearOfEducation, interests, plus avatar's compound value avatarSeed + avatarStyle),
+When all required keys are present in `collected_so_far` (preferredName, age, role,
+country, yearOfEducation, interests, plus avatar's compound value avatarSeed + avatarStyle,
+and parentEmail only when age is under 13),
 emit a `complete` step with:
   - `agent_text`: a short celebratory sentence in the user's locale that uses their
     `preferredName` (e.g. "Great, <name>! All set — let's go." — substitute the real
     preferredName, do not output the literal "<name>" placeholder).
-  - `profile`: the full collected object with camelCase keys. Pass `country`,
+  - `profile`: the full collected object with camelCase keys. Pass `role`, `country`,
     `yearOfEducation`, and `interests` through verbatim — do not parse, normalize, or
     split them. EXCEPTION: `profile.preferredName` MUST be the clean extracted name
     only (e.g. "Hisham"), never the raw sentence the user typed ("my name is Hisham").
@@ -145,7 +155,8 @@ root_agent = Agent(
     name="onboarding",
     description=(
         "5sosy onboarding agent. Conducts a friendly, locale-aware interview to collect "
-        "preferredName, age, country, yearOfEducation, interests, and avatar. Emits a "
+        "preferredName, age, role, parentEmail when required, country, "
+        "yearOfEducation, interests, and avatar. Emits a "
         "single JSON next-step per turn so the web client can render the appropriate "
         "input widget. Uses `research_year_options` to ground the year-of-education "
         "choices in the student's country."

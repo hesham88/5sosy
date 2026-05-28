@@ -1,4 +1,5 @@
 import type { NextRequest } from 'next/server';
+import { MIN_PARENT_CONSENT_AGE } from '@/lib/roles';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,6 +20,20 @@ const SIM_PLAN: SimStep[] = [
   { key: 'preferredName', input_type: 'text', ar: 'أهلاً! إيه الاسم اللي تحب أناديك بيه؟', en: 'Hi! What would you like me to call you?' },
   { key: 'age',            input_type: 'number', ar: 'كم سنك؟', en: 'How old are you?' },
   { key: 'country', input_type: 'text', ar: 'في أي دولة عايش؟', en: 'Which country do you live in?' },
+  { key: 'role', input_type: 'choice',
+    ar: 'ما هو دورك الأساسي في خصوصي؟',
+    en: 'Which role best describes you on 5sosy?',
+    options: [
+      { id: 'student', ar: 'طالب', en: 'Student' },
+      { id: 'parent', ar: 'ولي أمر', en: 'Parent' },
+      { id: 'teacher', ar: 'معلم', en: 'Teacher' },
+      { id: 'lifelong_learner', ar: 'متعلم مدى الحياة', en: 'Lifelong learner' },
+      { id: 'school_admin', ar: 'إداري مدرسة', en: 'School admin' }
+    ]
+  },
+  { key: 'parentEmail', input_type: 'text',
+    ar: 'تحتاج إلى موافقة ولي الأمر لأن سنك أقل من 13 سنة. ما هو البريد الإلكتروني لولي أمرك؟',
+    en: 'You need parent approval since you are under 13. What is your parent email?' },
   { key: 'yearOfEducation', input_type: 'choice',
     ar: 'في أي سنة دراسية؟', en: 'What year of education are you in?',
     otherFollowupAr: 'تمام، اكتب صفك أو سنتك الدراسية بالظبط.',
@@ -46,6 +61,7 @@ const SIM_PLAN: SimStep[] = [
 // picked "other" on a choice question that supports it.
 function nextSimStep(collected: Record<string, unknown>): SimStep | null {
   for (const step of SIM_PLAN) {
+    if (step.key === 'parentEmail' && !isUnderage(collected.age)) continue;
     const v = collected[step.key];
     if (v === undefined || v === null) return step;
     // "other" on choice steps → re-emit as a free-text follow-up with the same key.
@@ -63,6 +79,11 @@ function nextSimStep(collected: Record<string, unknown>): SimStep | null {
   return null;
 }
 
+function isUnderage(age: unknown): boolean {
+  const n = Number(age);
+  return Number.isFinite(n) && n > 0 && n < MIN_PARENT_CONSENT_AGE;
+}
+
 function sim(req: { locale: string; collected_so_far?: Record<string, unknown>; session_id?: string }): Response {
   const sessionId = req.session_id ?? crypto.randomUUID().replace(/-/g, '');
   const startedAt = new Date().toISOString();
@@ -78,6 +99,15 @@ function sim(req: { locale: string; collected_so_far?: Record<string, unknown>; 
       agent_text: isAR ? `تمام يا ${name}! خلصنا — يلا بينا.` : `Great, ${name}! All set — let's go.`,
       profile: collected
     };
+    if (isUnderage(collected.age)) {
+      nextStep.profile = {
+        ...collected,
+        parentConsent: {
+          status: 'pending',
+          parentEmail: collected.parentEmail
+        }
+      };
+    }
   } else {
     nextStep = {
       kind: 'question',

@@ -5,6 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import type { Locale } from '@/i18n/config';
 import type { Dictionary } from '@/i18n/get-dictionary';
 import { AuthProvider } from '@/lib/firebase/auth-context';
+import { Observability } from './Observability';
 
 type AppState = {
   locale: Locale;
@@ -78,7 +79,10 @@ export function Providers({
       streak, setStreak, xp, setXp, bumpStreak, pulseStreak,
       setLocale
     }}>
-      <AuthProvider>{children}</AuthProvider>
+      <AuthProvider>
+        <Observability />
+        {children}
+      </AuthProvider>
     </Ctx.Provider>
   );
 }

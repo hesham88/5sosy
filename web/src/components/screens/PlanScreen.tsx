@@ -8,6 +8,7 @@ import { AgentLog, Btn, Card, SubjectChip, type AgentLogLine } from '../shared/a
 import { SUBJECT_META, HUE, metaFor } from '@/constants/subjects';
 import { WEEK_PLAN } from '@/constants/seed-data';
 import { callAgent } from '@/lib/agents';
+import { SAMPLE_TIMETABLES } from '@/lib/sample-social';
 
 const TYPE_GLYPH: Record<string, string> = { review: '↻', quiz: '✓', lesson: '📖', practice: '✎', audio: '🎧', oral: '🎤' };
 
@@ -89,6 +90,36 @@ export default function PlanScreen() {
             <AgentLog lines={regenLog} heading="planner.log" speed={12} />
           </div>
         )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+          <TimetableCard
+            title="School timetable"
+            subtitle="Weekly classes from school schedule"
+            rows={SAMPLE_TIMETABLES.schoolWeek.map((row) => ({
+              a: `${row.day} ${row.time}`,
+              b: row.subject,
+              c: row.location
+            }))}
+          />
+          <TimetableCard
+            title="Exam timetable"
+            subtitle="Planned exam dates and scope"
+            rows={SAMPLE_TIMETABLES.exams.map((row) => ({
+              a: row.date,
+              b: row.subject,
+              c: row.scope
+            }))}
+          />
+          <TimetableCard
+            title="Generated study plan"
+            subtitle="School, exam, sleep, and wake patterns merged"
+            rows={SAMPLE_TIMETABLES.generatedStudyPlan.map((row) => ({
+              a: `${row.day} ${row.start}-${row.end}`,
+              b: row.subject,
+              c: row.reason
+            }))}
+          />
+        </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <div className="lg:col-span-8 min-w-0">
@@ -190,10 +221,69 @@ export default function PlanScreen() {
                 })}
               </div>
             </Card>
+
+            <Card className="p-5">
+              <div className="font-extrabold text-slate-900 text-[15px] mb-3">Plan revisions</div>
+              <div className="space-y-2">
+                {SAMPLE_TIMETABLES.revisions.map((revision) => (
+                  <button key={revision.id} className="w-full rounded-lg bg-slate-50 px-3 py-2 text-start hover:bg-slate-100">
+                    <div className="text-[12px] font-bold text-slate-800">{revision.label}</div>
+                    <div className="text-[10.5px] text-slate-400 ltr">{revision.createdAt}</div>
+                  </button>
+                ))}
+              </div>
+              <div className="mt-3 text-[11.5px] text-slate-500">
+                Revert support is modeled as immutable plan versions so users can restore a prior timetable without rebuilding it.
+              </div>
+            </Card>
+
+            <Card className="p-5">
+              <div className="font-extrabold text-slate-900 text-[15px] mb-3">Curriculum progress scaffold</div>
+              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-3">
+                <div className="text-[12px] font-bold text-slate-800">
+                  Where have you reached in the student book for Physics in G12?
+                </div>
+                <input
+                  className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px] outline-none focus:border-sky-400"
+                  placeholder="Example: Chapter 4, page 88"
+                />
+              </div>
+              <div className="mt-3 text-[11.5px] text-slate-500">
+                This placeholder lets teachers, admins, or students pin actual school pace before future planner runs.
+              </div>
+            </Card>
           </div>
         </div>
       </div>
     </ChromeLayout>
+  );
+}
+
+function TimetableCard({
+  title,
+  subtitle,
+  rows
+}: {
+  title: string;
+  subtitle: string;
+  rows: Array<{ a: string; b: string; c: string }>;
+}) {
+  return (
+    <Card className="p-4">
+      <div className="font-extrabold text-slate-900 text-[15px]">{title}</div>
+      <div className="text-[11.5px] text-slate-500 mt-0.5 mb-3">{subtitle}</div>
+      <div className="space-y-2">
+        {rows.slice(0, 4).map((row) => (
+          <div key={`${row.a}-${row.b}`} className="rounded-lg bg-slate-50 px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[12px] font-bold text-slate-800">{row.b}</div>
+              <div className="text-[10.5px] font-mono text-slate-400">{row.a}</div>
+            </div>
+            <div className="mt-0.5 text-[11.5px] text-slate-500 truncate">{row.c}</div>
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }
 

@@ -2,16 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { doc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { useApp } from '../shared/Providers';
 import { Btn, Logo } from '../shared/atoms';
 import { useAuth } from '@/lib/firebase/auth-context';
 import { useProfile } from '@/lib/firebase/use-profile';
-import { getFirebase } from '@/lib/firebase/client';
 import { dicebearUrl, randomSeed } from '@/lib/avatar';
 import { AVATAR_SEED_PALETTE, AVATAR_STYLES } from '@/constants/onboarding';
 import type { AvatarStyle } from '@/lib/types';
 import { LanguageSwitcher } from '../shared/LanguageSwitcher';
+import { MIN_PARENT_CONSENT_AGE } from '@/lib/roles';
+import { recordActivity } from '@/lib/activity';
 
 type InputType = 'text' | 'number' | 'choice' | 'avatar';
 
@@ -48,6 +48,11 @@ type NextStep = NextStepQuestion | NextStepComplete;
 type ChatMsg = { id: string; role: 'agent' | 'user'; text: string };
 
 const uid = () => Math.random().toString(36).slice(2, 10);
+
+function isUnderage(age: unknown): boolean {
+  const n = Number(age);
+  return Number.isFinite(n) && n > 0 && n < MIN_PARENT_CONSENT_AGE;
+}
 
 async function streamOnboarding(
   body: {
@@ -143,8 +148,13 @@ export default function OnboardingScreen() {
     async (answerText: string, answerValue: unknown | null, key: string | null) => {
       setPending(true);
       setError(null);
-      const next: Record<string, unknown> =
-        key && answerValue !== null ? { ...collected, [key]: answerValue } : { ...collected };
+      const answerPatch =
+        key === 'avatar' && answerValue && typeof answerValue === 'object'
+          ? { avatar: true, ...(answerValue as Record<string, unknown>) }
+          : key && answerValue !== null
+            ? { [key]: answerValue }
+            : {};
+      const next: Record<string, unknown> = { ...collected, ...answerPatch };
       setCollected(next);
       if (answerText.trim()) {
         setMessages((m) => [...m, { id: uid(), role: 'user', text: answerText }]);
@@ -200,43 +210,57 @@ export default function OnboardingScreen() {
       if (!user) return;
       setFinishing(true);
       try {
-        const { db } = getFirebase();
-        const userRef = doc(db, 'users', user.uid);
-        const provider = (process.env.NEXT_PUBLIC_DATABASE_PROVIDER || 'firestore').toLowerCase();
-
         const profileWrite: Record<string, unknown> = {
           ...finalProfile,
+          role: finalProfile.role ?? 'student',
           onboardingCompleted: true,
-          onboardingCompletedAt: provider === 'mongodb' ? new Date().toISOString() : serverTimestamp()
+          onboardingCompletedAt: new Date().toISOString()
         };
 
-        if (provider === 'mongodb') {
-          const token = await user.getIdToken();
-          const writeRes = await fetch('/api/users/profile', {
+        const token = await user.getIdToken();
+        const writeRes = await fetch('/api/users/profile', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'content-type': 'application/json'
+          },
+          body: JSON.stringify(profileWrite)
+        });
+        if (!writeRes.ok) {
+          const body = await writeRes.json().catch(() => ({}));
+          throw new Error(
+            typeof body.error === 'string' ? body.error : `profile save failed: HTTP ${writeRes.status}`
+          );
+        }
+
+        if (isUnderage(profileWrite.age) && typeof profileWrite.parentEmail === 'string') {
+          await fetch('/api/parent-consent/request', {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${token}`,
               'content-type': 'application/json'
             },
-            body: JSON.stringify(profileWrite)
+            body: JSON.stringify({ parentEmail: profileWrite.parentEmail })
           });
-          if (!writeRes.ok) {
-            throw new Error(`profile save failed: HTTP ${writeRes.status}`);
+        }
+
+        await recordActivity(user, {
+          type: 'profile_update',
+          title: 'Completed onboarding',
+          resourceType: 'profile',
+          visibility: 'private',
+          metadata: { role: profileWrite.role, underage: isUnderage(profileWrite.age) }
+        });
+
+        const verifyRes = await fetch('/api/users/profile', {
+          headers: { 'Authorization': `Bearer ${token}` },
+          cache: 'no-store',
+        });
+        if (verifyRes.ok) {
+          const verifyDoc = await verifyRes.json();
+          if (verifyDoc?.onboardingCompleted !== true) {
+            throw new Error('profile verification failed: onboardingCompleted not set');
           }
-          // Verify the flag actually landed before navigating, otherwise
-          // AuthGate would see stale state and bounce us back here.
-          const verifyRes = await fetch('/api/users/profile', {
-            headers: { 'Authorization': `Bearer ${token}` },
-            cache: 'no-store',
-          });
-          if (verifyRes.ok) {
-            const verifyDoc = await verifyRes.json();
-            if (verifyDoc?.onboardingCompleted !== true) {
-              throw new Error('profile verification failed: onboardingCompleted not set');
-            }
-          }
-        } else {
-          await setDoc(userRef, profileWrite, { merge: true });
         }
 
         // Hard navigation — bypasses Next.js client cache so AuthGate +
@@ -275,8 +299,9 @@ export default function OnboardingScreen() {
 
   const progress = useMemo(() => {
     const totalKeys = [
-      'preferredName', 'age', 'country',
-      'yearOfEducation', 'interests', 'avatarSeed'
+      'preferredName', 'age', 'role',
+      ...(isUnderage(collected.age) ? ['parentEmail'] : []),
+      'country', 'yearOfEducation', 'interests', 'avatarSeed'
     ];
     const done = totalKeys.filter((k) => collected[k] !== undefined && collected[k] !== null).length;
     return { done, total: totalKeys.length };
@@ -580,4 +605,3 @@ function AvatarPicker({
     </div>
   );
 }
-

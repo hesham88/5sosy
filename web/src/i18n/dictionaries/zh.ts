@@ -5,7 +5,7 @@ const dict = {
   appSub: '你的 AI 导师',
   nav: {
     home: '首页', subjects: '学科', books: '书籍', plan: '计划',
-    practice: '练习', oral: '口语', progress: '进度', settings: '设置',
+    practice: '练习', oral: '口语', progress: '进度', community: 'Community', admin: 'Admin', settings: '设置',
     profile: '个人资料', signOut: '退出登录', menu: '菜单', close: '关闭'
   },
   cta: { start: '开始', next: '下一步', back: '返回', save: '保存', finish: '完成', skip: '跳过', signIn: '登录', signUp: '注册' },
