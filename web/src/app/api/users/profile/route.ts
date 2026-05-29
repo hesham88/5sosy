@@ -3,7 +3,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { getAdmin } from '@/lib/firebase/admin';
 import { connectToDatabase } from '@/lib/mongodb';
 import { buildBaseUserProfile, isValidUsername, normalizeUsername } from '@/lib/profile';
-import { defaultBadges, defaultUserSettings } from '@/lib/profile';
+import { defaultUserSettings } from '@/lib/profile';
 import { resolveUserRole } from '@/lib/roles';
 
 export const runtime = 'nodejs';
@@ -30,11 +30,25 @@ function isAnonymous(decoded: { firebase?: { sign_in_provider?: string } }) {
   return decoded.firebase?.sign_in_provider === 'anonymous';
 }
 
-function cleanProfileBody(
+// Splits an incoming profile write into:
+//   - `defaults`: the full base profile, applied ONLY when the doc is first
+//     created (insert). It carries onboardingCompleted=false and the grade/xp/
+//     streak/etc. seed values.
+//   - `updates`: only the fields the caller actually sent, applied on every
+//     write. Anything absent from `body` is left untouched on existing docs.
+// This separation is critical: callers like the login touch send just
+// {lastSeenAt,lastLoginAt}. If base defaults were merged into every write (the
+// old behavior), each login reset onboardingCompleted back to false — bouncing
+// the user into onboarding forever — and wiped grade/xp/streak/displayName.
+function buildProfileWrite(
   body: Record<string, unknown>,
   decoded: { uid: string; email?: string; name?: string; picture?: string; firebase?: unknown }
-) {
-  const base = buildBaseUserProfile({
+): {
+  defaults: Record<string, unknown>;
+  updates: Record<string, unknown>;
+  usernameToCheck: string | null;
+} {
+  const defaults = buildBaseUserProfile({
     uid: decoded.uid,
     email: decoded.email ?? null,
     displayName: decoded.name ?? null,
@@ -43,30 +57,44 @@ function cleanProfileBody(
     username: typeof body.username === 'string' ? body.username : undefined,
     role: body.role
   });
-  const username = normalizeUsername(body.username ?? base.username);
-  if (!isValidUsername(username)) {
-    throw new Error('Username must be 3-32 characters and use letters, numbers, underscore, or hyphen.');
-  }
-  const role = resolveUserRole(decoded.email ?? null, body.role);
-  const settingsFromBody =
-    body.settings && typeof body.settings === 'object' && !Array.isArray(body.settings)
-      ? (body.settings as Record<string, unknown>)
-      : {};
 
-  return {
-    ...base,
-    ...body,
-    uid: decoded.uid,
-    email: decoded.email ?? (typeof body.email === 'string' ? body.email : null),
-    isAnonymous: false,
-    username,
-    role,
-    settings: {
+  const updates: Record<string, unknown> = { ...body };
+  for (const k of ['_id', 'id', 'uid', 'isAnonymous', 'username', 'role', 'settings', 'badges', 'updatedAtServer']) {
+    delete updates[k];
+  }
+
+  // Server-authoritative identity — safe to refresh on every write, never trust
+  // the client for these.
+  updates.uid = decoded.uid;
+  updates.email = decoded.email ?? (typeof body.email === 'string' ? body.email : null);
+  updates.isAnonymous = false;
+
+  let usernameToCheck: string | null = null;
+  if (typeof body.username === 'string') {
+    const username = normalizeUsername(body.username);
+    if (!isValidUsername(username)) {
+      throw new Error('Username must be 3-32 characters and use letters, numbers, underscore, or hyphen.');
+    }
+    updates.username = username;
+    usernameToCheck = username;
+  }
+
+  if (body.role !== undefined) {
+    updates.role = resolveUserRole(decoded.email ?? null, body.role);
+  }
+
+  if (body.settings && typeof body.settings === 'object' && !Array.isArray(body.settings)) {
+    updates.settings = {
       ...defaultUserSettings(),
-      ...settingsFromBody
-    },
-    badges: Array.isArray(body.badges) ? body.badges : defaultBadges(role)
-  };
+      ...(body.settings as Record<string, unknown>)
+    };
+  }
+
+  if (Array.isArray(body.badges)) {
+    updates.badges = body.badges;
+  }
+
+  return { defaults, updates, usernameToCheck };
 }
 
 export async function GET(req: Request) {
@@ -115,49 +143,65 @@ export async function POST(req: Request) {
 
     const body = (await req.json()) as Record<string, unknown>;
     const provider = (process.env.DATABASE_PROVIDER || 'firestore').toLowerCase();
-    const data: Record<string, unknown> = cleanProfileBody(body, decoded);
+    const { defaults, updates, usernameToCheck } = buildProfileWrite(body, decoded);
 
     if (provider === 'mongodb') {
       const { db } = await connectToDatabase();
 
-      const existingUsername = await db.collection('users').findOne({
-        username: data.username,
-        _id: { $ne: decoded.uid } as any
-      });
-      if (existingUsername) {
-        return NextResponse.json({ error: 'Username is already taken' }, { status: 409 });
+      if (usernameToCheck) {
+        const existingUsername = await db.collection('users').findOne({
+          username: usernameToCheck,
+          _id: { $ne: decoded.uid } as any
+        });
+        if (existingUsername) {
+          return NextResponse.json({ error: 'Username is already taken' }, { status: 409 });
+        }
       }
 
-      delete data._id;
-      delete data.id;
-      data.updatedAt = new Date().toISOString();
+      const set: Record<string, unknown> = { ...updates, updatedAt: new Date().toISOString() };
+
+      // Insert-only defaults must not overlap any $set key, or MongoDB throws a
+      // path conflict. Strip everything we're already setting.
+      const setOnInsert: Record<string, unknown> = { ...defaults };
+      for (const k of Object.keys(set)) delete setOnInsert[k];
+      delete setOnInsert._id;
+
+      const update: Record<string, unknown> = { $set: set };
+      if (Object.keys(setOnInsert).length > 0) update.$setOnInsert = setOnInsert;
 
       await db.collection('users').updateOne(
         { _id: decoded.uid as any },
-        { $set: data },
+        update,
         { upsert: true }
       );
-      
+
       return NextResponse.json({ success: true });
     } else {
       // Firestore
       const { db } = getAdmin();
-      const usernameSnap = await db
-        .collection('users')
-        .where('username', '==', data.username)
-        .limit(2)
-        .get();
-      const collision = usernameSnap.docs.find((doc) => doc.id !== decoded.uid);
-      if (collision) {
-        return NextResponse.json({ error: 'Username is already taken' }, { status: 409 });
+      if (usernameToCheck) {
+        const usernameSnap = await db
+          .collection('users')
+          .where('username', '==', usernameToCheck)
+          .limit(2)
+          .get();
+        const collision = usernameSnap.docs.find((doc) => doc.id !== decoded.uid);
+        if (collision) {
+          return NextResponse.json({ error: 'Username is already taken' }, { status: 409 });
+        }
       }
 
-      delete data.id;
-      
-      data.updatedAt = new Date().toISOString();
-      data.updatedAtServer = FieldValue.serverTimestamp();
-      await db.collection('users').doc(decoded.uid).set(data, { merge: true });
-      
+      const ref = db.collection('users').doc(decoded.uid);
+      const snap = await ref.get();
+      // Seed base defaults only when the doc doesn't exist yet; on an existing
+      // doc, write just the explicit fields so a partial update can't reset
+      // onboardingCompleted / grade / xp / streak.
+      const write: Record<string, unknown> = snap.exists ? { ...updates } : { ...defaults, ...updates };
+      delete write.id;
+      write.updatedAt = new Date().toISOString();
+      write.updatedAtServer = FieldValue.serverTimestamp();
+      await ref.set(write, { merge: true });
+
       return NextResponse.json({ success: true });
     }
   } catch (err) {
